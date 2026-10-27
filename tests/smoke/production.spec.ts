@@ -146,3 +146,10 @@ test(`robots.txt 与页面 robots 符合 ${EXPECT}`, async ({ request, page }) =
     expect(robots).toMatch(/Disallow: \/\s*$/)
   }
 })
+
+test('llms.txt 可访问，以站点名开头', async ({ request }) => {
+  const res = await request.get('/llms.txt')
+  expect(res.status()).toBe(200)
+  expect(res.headers()['content-type']).toContain('text/plain')
+  expect((await res.text()).startsWith('# ')).toBe(true)
+})

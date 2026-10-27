@@ -35,11 +35,12 @@ export function mockPaidKey(orderId: string) {
   return `mock_paid:${orderId}`
 }
 
-export function activePaymentProviderId(env: Env): PaymentProviderId {
-  const id = env.PAYMENT_PROVIDER as PaymentProviderId
+// 后台运营设置“收款渠道”（settings.paymentProvider）非空时覆盖 PAYMENT_PROVIDER，只影响新订单
+export function activePaymentProviderId(env: Env, override?: string): PaymentProviderId {
+  const id = (override || env.PAYMENT_PROVIDER) as PaymentProviderId
   if (id === 'waffo' || id === 'dodo' || id === 'stripe') return id
   if (id === 'mock' && !isProduction(env)) return 'mock'
-  throw new ApiError(503, 'payment_not_configured', `Unsupported PAYMENT_PROVIDER: ${env.PAYMENT_PROVIDER}`)
+  throw new ApiError(503, 'payment_not_configured', `Unsupported PAYMENT_PROVIDER: ${id}`)
 }
 
 // 退款、查单按订单所属支付商走（切换 PAYMENT_PROVIDER 后，旧订单仍找原支付商）；生产环境不认 mock 订单
@@ -51,10 +52,11 @@ export function getOrderProvider(env: Env, id: string): PaymentProvider | null {
   return null
 }
 
-export function getPaymentProvider(env: Env): PaymentProvider {
-  const id = activePaymentProviderId(env)
+export function getPaymentProvider(env: Env, override?: string): PaymentProvider {
+  const id = activePaymentProviderId(env, override)
   if (id === 'waffo') return createWaffoProvider(env)
   if (id === 'dodo') return createDodoProvider(env)
   if (id === 'stripe') return createStripeProvider(env)
   return createMockProvider(env)
 }
+

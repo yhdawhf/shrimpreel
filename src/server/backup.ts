@@ -1,4 +1,5 @@
 import { sendEmails } from './email'
+import { alertBucket, notifyAlertChat, type Alert } from './alerts'
 import { adminAlerts } from './notifications'
 
 // D1 每日备份：Cron（每 5 分钟）发现当天（UTC）还没有备份就导出一次，gzip 后存进 MEDIA 的 backups/d1/<日期>.sql.gz，
@@ -124,13 +125,15 @@ export async function runDailyBackup(env: Env, now = new Date()) {
     const message = error instanceof Error ? error.message : String(error)
     console.error('[alert] d1 backup failed', message)
     if (attempts + 1 >= MAX_ATTEMPTS_PER_DAY) {
+      const alert: Alert = { kind: 'backup_failed', count: attempts + 1, total: null, windowMinutes: 24 * 60, detail: message.slice(0, 300) }
       await sendEmails(
         env,
         adminAlerts(env, `admin_alert:backup_failed:${day}`, () => ({
           template: 'admin_alert',
-          params: { kind: 'backup_failed', count: attempts + 1, total: null, windowMinutes: 24 * 60, detail: message.slice(0, 300) },
+          params: alert,
         })),
       )
+      await notifyAlertChat(env, alert, alertBucket(now.getTime()))
     }
     return null
   }

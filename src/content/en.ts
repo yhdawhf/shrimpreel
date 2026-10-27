@@ -20,7 +20,7 @@ export function en(s: S) {
   const { uploadDays, outputDays } = s.retention
   const photoRetention = uploadDays > 0 ? `deleted automatically ${uploadDays} days after upload` : 'kept until you delete them'
   const videoRetention = outputDays > 0 ? `kept for ${outputDays} days after they finish` : 'kept until you delete them'
-  const { ga4Id, cfBeaconToken } = s.analytics
+  const { ga4Id, cfBeaconToken, umamiWebsiteId } = s.analytics
   // 每种风格的展示名和一句话介绍；site.styles 加风格时这里补一项（缺了 typecheck 报错），zh.ts 同
   const styles: Record<StyleId, StyleCopy> = {
     'neon-shuffle-v1': { name: k, tagline: 'The original routine, beat for beat.' },
@@ -93,6 +93,8 @@ export function en(s: S) {
       ctaSignUp: 'Sign up free and start',
       ctaGenerate: (n: number) => `Generate video · ${n} credits`,
       ctaBuy: 'Get credits to generate',
+      ctaBuyPack: (credits: number, price: string) => `Get ${credits} credits · ${price}`,
+      seePacks: 'See all packs',
       balance: (n: number) => `Balance: ${n} credits`,
       needMore: (n: number) => `You need ${n} more credits for this length.`,
       needPhoto: 'Add a photo first.',
@@ -196,8 +198,12 @@ export function en(s: S) {
       save: (percent: number) => `Save ${percent}%`,
       buy: 'Buy credits',
       buying: 'Opening checkout…',
+      // 后台“暂停收款”打开时代替购买按钮和价格说明
+      paused: 'Payments opening soon',
+      pausedNote: 'We’re finishing setup with our payment partner, so purchases aren’t open yet. Check back soon.',
       credits: (n: number) => `${n} credits`,
-      approx: (videos: number, seconds: number) => `≈ ${videos} videos of ${seconds} s`,
+      makes: (items: { videos: number; seconds: number }[]) =>
+        `Makes ${items.map((i) => `${i.videos} × ${i.seconds}s`).join(' or ')} ${items.length === 1 && items[0]!.videos === 1 ? 'video' : 'videos'}`,
       bullets: ['Credits never expire', 'All video lengths', 'HD MP4 download, no watermark', 'Automatic refund on failed renders'],
       note: 'Prices in USD. Taxes are calculated at checkout by our payment partner.',
       // 价格页底部的教程链接
@@ -267,16 +273,23 @@ export function en(s: S) {
       refund: 'Refund Policy',
       report: 'Report content',
       rights: `© ${new Date().getFullYear()} ${b}. All rights reserved.`,
+      // 页脚“问问 AI”：llms.txt 链接 + 几个带预填提问的 AI 按钮
+      agentDocs: 'AI & agent docs',
+      askAi: `See what ChatGPT, Claude, Perplexity, Gemini or Grok say about ${b}.`,
+      askAiLabel: (ai: string) => `Ask ${ai} about ${b}`,
+      askAiPrompt: (url: string, llms: string) => `What is ${b} (${url})? Summarize what it does, how pricing works and who it is for. Site summary for AI: ${llms}`,
     },
     support: { label: 'Help & support' },
     // 统计同意横幅：只在配置了 GA4 时出现
     consent: {
       title: 'Analytics cookies',
-      body: 'We’d like to use Google Analytics cookies, plus a first-party cookie that records which link brought you here, to understand how the site is used and which channels work. They are only set if you accept, and you can change your choice at any time under “Cookie settings” in the footer.',
+      body: 'We use Google Analytics and a first-party referral cookie to see how the site is used. Nothing is set unless you accept; change it any time under “Cookie settings”.',
       learnMore: 'Privacy Policy',
       accept: 'Accept',
       reject: 'Reject',
       settings: 'Cookie settings',
+      // × 只收起本次，不记录选择
+      dismiss: 'Dismiss',
     },
     signIn: {
       title: `Sign in to ${b}`,
@@ -497,6 +510,7 @@ export function en(s: S) {
       already_redeemed: 'You have already redeemed this code.',
       too_many_active_jobs: 'You already have 3 videos rendering. Please wait for one to finish.',
       maintenance: 'We’re doing some maintenance. Please try again in a little while.',
+      checkout_paused: 'Payments aren’t open yet. Please check back soon.',
       daily_limit: 'We’ve hit today’s rendering capacity. Please try again tomorrow; your credits were not used.',
       rate_limited: 'Too many requests. Please wait a minute and try again.',
       file_too_large: 'That file is larger than 10 MB.',
@@ -554,8 +568,11 @@ export function en(s: S) {
               s.referralRewardCredits > 0
                 ? 'If you open a friend’s invite link, we set a cookie (vt_ref, kept for up to 30 days and removed once you sign up) so the invite can be credited. To prevent abuse of invite rewards, we store a salted hash of your IP address with the invite, not the address itself. Neither of you can see the other’s account details.'
                 : '',
-              ga4Id || cfBeaconToken ? '' : 'We do not use third-party analytics or advertising cookies.',
+              ga4Id || cfBeaconToken || umamiWebsiteId ? '' : 'We do not use third-party analytics or advertising cookies.',
               cfBeaconToken ? 'We count page views with Cloudflare Web Analytics, which does not use cookies or track you across websites.' : '',
+              umamiWebsiteId
+                ? 'We count visits with Umami, a cookie-free analytics tool loaded from our own domain. It does not set cookies or store your IP address; your IP address is only used to determine your country and to count unique visits.'
+                : '',
               ga4Id
                 ? 'If you accept analytics cookies in the banner, we also use Google Analytics. It sets cookies (such as _ga) and lets Google process your IP address and device information to produce usage reports for us. Google Analytics is not loaded until you accept. You can withdraw consent at any time under “Cookie settings” in the footer, which also deletes these cookies.'
                 : '',
@@ -571,7 +588,7 @@ export function en(s: S) {
                 },
               ]
             : []),
-          { h: 'Service providers', p: [`We rely on a small number of processors: cloud hosting, storage and email delivery, an AI rendering provider that processes your photo only for your request, a content-safety classifier, a payment provider acting as merchant of record${ga4Id || cfBeaconToken ? ', and the analytics services described above' : ''}.`] },
+          { h: 'Service providers', p: [`We rely on a small number of processors: cloud hosting, storage and email delivery, an AI rendering provider that processes your photo only for your request, a content-safety classifier, a payment provider acting as merchant of record${ga4Id || cfBeaconToken || umamiWebsiteId ? ', and the analytics services described above' : ''}.`] },
           { h: 'Your rights', p: [`You can download or delete your videos at any time. In Settings you can export a copy of your data as JSON or delete your account. For any other privacy request, email ${s.supportEmail}.`] },
         ],
       },

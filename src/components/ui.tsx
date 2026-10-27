@@ -19,7 +19,7 @@ export function LogoMark({ className = 'size-9 text-sm' }: { className?: string 
   return (
     <span
       aria-hidden
-      className={`grid shrink-0 place-items-center rounded-xl bg-[linear-gradient(135deg,var(--accent),#7b2cbf_55%,var(--accent-2))] font-bold tracking-tight text-white shadow-sm ${className}`}
+      className={`grid shrink-0 place-items-center rounded-xl bg-(image:--logo-bg) font-bold tracking-tight text-(--logo-fg) shadow-sm ${className}`}
     >
       {site.logoMark}
     </span>
@@ -30,7 +30,7 @@ export function Logo() {
   return (
     <LocalLink to="/" className="flex items-center gap-2.5">
       <LogoMark />
-      <span className="font-mono text-lg font-bold tracking-[0.12em] uppercase">{site.brandName}</span>
+      <span className="brand-name">{site.brandName}</span>
     </LocalLink>
   )
 }

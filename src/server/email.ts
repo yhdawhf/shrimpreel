@@ -1,8 +1,9 @@
 import { site } from '#/config/site'
 import { isEmailTemplate, renderEmail, type EmailTemplate, type TemplateParams } from './email-templates'
-import { createId, nowIso } from './util'
+import { createResendMailer } from './resend'
+import { cleanSecret, createId, nowIso } from './util'
 
-// 交易邮件发件箱（Cloudflare Email Service，send_email binding）。
+// 交易邮件发件箱（默认 Cloudflare Email Service 的 send_email binding；配了 RESEND_API_KEY 则走 Resend）。
 // 业务流程里先按 dedupe_key 写入 email_outbox（同一事件只会有一行），再立即尝试发送；
 // 临时失败留在 pending 按退避重试，Cron 每 5 分钟补发。通知失败从不影响主流程。
 // https://developers.cloudflare.com/email-service/api/send-emails/workers-api/
@@ -54,13 +55,19 @@ export interface EmailConfig {
   mailer: Mailer
   from: { email: string; name: string }
   siteUrl: string
+  provider: 'resend' | 'cloudflare'
 }
 
-// 没配 EMAIL_FROM 或没有 binding：不发信，记录为 skipped（后台可见）
+// 配了 RESEND_API_KEY（可选 secret）且 EMAIL_FROM 非空：全部走 Resend。
+// 否则用 send_email binding；没配 EMAIL_FROM 或没有 binding：不发信，记录为 skipped（后台可见）
 export function emailConfig(env: Env): EmailConfig | null {
   const from = env.EMAIL_FROM?.trim()
-  if (!from || !env.EMAIL) return null
-  return { mailer: env.EMAIL, from: { email: from, name: site.brandName }, siteUrl: env.SITE_URL }
+  if (!from) return null
+  const base = { from: { email: from, name: site.brandName }, siteUrl: env.SITE_URL }
+  const resendKey = cleanSecret(env.RESEND_API_KEY)
+  if (resendKey) return { ...base, mailer: createResendMailer(resendKey), provider: 'resend' }
+  if (!env.EMAIL) return null
+  return { ...base, mailer: env.EMAIL, provider: 'cloudflare' }
 }
 
 export type DeliveryResult =

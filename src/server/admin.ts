@@ -1,6 +1,5 @@
 import { Hono } from 'hono'
-import { findPlan, sellingPlans, site } from '#/config/site'
-import { REQUIRED_BINDINGS, checkConfig } from './config-health'
+import { findPlan } from '#/config/site'
 import { ledgerStatements } from './credits'
 import { emailConfig, retryEmail } from './email'
 import { audit, pageParams, publicGeneration, readJson, requireAdmin } from './http'
@@ -14,7 +13,8 @@ import { reconcileOrder } from './reconcile'
 import { registerRedeemAdminRoutes } from './redeem'
 import { registerReferralAdminRoutes } from './referrals'
 import { registerReportRoutes } from './reports'
-import { registerSettingsAdminRoutes } from './settings'
+import { configIssues } from './runtime-config'
+import { getSettings, registerSettingsAdminRoutes } from './settings'
 import { removeReportedContent } from './takedown'
 import type { AppContext, GenerationRow, OrderRow, TakedownRow, UserRow } from './types'
 import { ApiError, createId, isCheckConstraintError, isUniqueConstraintError, nowIso } from './util'
@@ -49,19 +49,6 @@ const perCredit = (result: D1Result) => {
   return row?.credits ? Number(row.cents) / row.credits : null
 }
 
-// 运行时配置检查：与部署前的 npm run doctor 同一套规则，按实际 env 检查（含 SESSION_SECRET 强度），只返回问题，不返回值
-function configIssues(env: Env) {
-  const record = env as unknown as Record<string, unknown>
-  const strings = Object.fromEntries(Object.entries(record).filter(([, v]) => typeof v === 'string')) as Record<string, string>
-  return checkConfig({
-    vars: strings,
-    secrets: strings,
-    bindings: REQUIRED_BINDINGS.filter((name) => record[name] != null),
-    packageIds: site.packages.map((p) => p.id),
-    planIds: sellingPlans.map((p) => p.id),
-    siteDomain: site.domain,
-  })
-}
 
 adminRoutes.get('/stats', async (c) => {
   const db = c.env.DB
@@ -116,7 +103,7 @@ adminRoutes.get('/stats', async (c) => {
     failedEmails: count(failedEmails!),
     generationCost30d: { videos: cost.videos, costCents: cost.cost_cents, creditsUsed: cost.credits },
     revenuePerCreditCents: perCredit(perCreditRow!),
-    config: configIssues(c.env),
+    config: configIssues(c.env, (await getSettings(c.env)).paymentProvider),
   })
 })
 

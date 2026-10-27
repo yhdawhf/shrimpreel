@@ -156,6 +156,10 @@ export function checkConfig(input: ConfigInput): ConfigIssue[] {
   if (vars('TURNSTILE_SITE_KEY')) requireSecrets(['TURNSTILE_SECRET_KEY'], 'Turnstile')
   else warn('TURNSTILE_SITE_KEY', 'TURNSTILE_SITE_KEY 为空：留言和举报表单没有人机校验，只靠限流')
 
+  // Umami 同域代理（可选）：只检查格式
+  const umami = vars('UMAMI_ORIGIN')
+  if (umami && !/^https:\/\/[^/?#\s]+$/.test(umami)) warn('UMAMI_ORIGIN', 'UMAMI_ORIGIN 不是不带路径的 https 地址（如 https://umami.example.com）：Umami 统计无法代理')
+
   // 付款即时通知（可选）：只检查格式，不输出地址（里面带 token）
   const chat = input.secrets.PAYMENT_NOTIFY_WEBHOOK_URL
   if (typeof chat === 'string' && text(chat)) {
@@ -180,8 +184,23 @@ export function checkConfig(input: ConfigInput): ConfigIssue[] {
   const fromDomain = from.split('@')[1]?.toLowerCase() ?? ''
   if (!from) warn('EMAIL_FROM', 'EMAIL_FROM 为空：不发交易邮件和管理员提醒')
   else if (!fromDomain || PLACEHOLDER_HOSTS.test(fromDomain)) error('EMAIL_FROM', `EMAIL_FROM=${from}：不是可发信的地址`)
-  else if (production && !PLACEHOLDER_HOSTS.test(input.siteDomain) && !sameSite(fromDomain, input.siteDomain.toLowerCase())) {
-    warn('EMAIL_FROM', `EMAIL_FROM 的域名 ${fromDomain} 与站点域名 ${input.siteDomain} 不同：确认该域名已在 Email Service 完成 Onboard`)
+  else {
+    // 可选的 Resend 渠道：配了 RESEND_API_KEY 就走 Resend，不再用 send_email binding
+    const resend = input.secrets.RESEND_API_KEY === true || Boolean(text(input.secrets.RESEND_API_KEY as string | undefined))
+    if (production && !resend) {
+      warn(
+        'RESEND_API_KEY',
+        '未配置 RESEND_API_KEY：Cloudflare Email Service 在 Workers Free 上只能发给 Cloudflare 里已验证的地址（管理员），发给用户需要 Workers Paid，或配置 RESEND_API_KEY 改走 Resend',
+      )
+    }
+    if (production && !PLACEHOLDER_HOSTS.test(input.siteDomain) && !sameSite(fromDomain, input.siteDomain.toLowerCase())) {
+      warn(
+        'EMAIL_FROM',
+        resend
+          ? `EMAIL_FROM 的域名 ${fromDomain} 与站点域名 ${input.siteDomain} 不同：确认该域名已在 Resend 完成验证（Domains）`
+          : `EMAIL_FROM 的域名 ${fromDomain} 与站点域名 ${input.siteDomain} 不同：确认该域名已在 Email Service 完成 Onboard`,
+      )
+    }
   }
 
   return issues

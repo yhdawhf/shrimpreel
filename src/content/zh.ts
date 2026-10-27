@@ -17,7 +17,7 @@ export function zh(s: S): Content {
   const { uploadDays, outputDays } = s.retention
   const photoRetention = uploadDays > 0 ? `在上传 ${uploadDays} 天后自动删除` : '保留到你主动删除为止'
   const videoRetention = outputDays > 0 ? `在完成 ${outputDays} 天后自动删除` : '保留到你主动删除为止'
-  const { ga4Id, cfBeaconToken } = s.analytics
+  const { ga4Id, cfBeaconToken, umamiWebsiteId } = s.analytics
   return {
     styles,
     meta: {
@@ -84,6 +84,8 @@ export function zh(s: S): Content {
       ctaSignUp: '免费注册，立即开始',
       ctaGenerate: (n: number) => `生成视频 · ${n} 积分`,
       ctaBuy: '购买积分后生成',
+      ctaBuyPack: (credits: number, price: string) => `购买 ${credits} 积分 · ${price}`,
+      seePacks: '查看全部套餐',
       balance: (n: number) => `余额：${n} 积分`,
       needMore: (n: number) => `该时长还差 ${n} 积分。`,
       needPhoto: '请先上传照片。',
@@ -178,8 +180,10 @@ export function zh(s: S): Content {
       save: (percent: number) => `省 ${percent}%`,
       buy: '购买积分',
       buying: '正在打开支付页…',
+      paused: '支付即将开放',
+      pausedNote: '我们正在和支付合作方完成开通，暂时还不能购买，请稍后再来。',
       credits: (n: number) => `${n} 积分`,
-      approx: (videos: number, seconds: number) => `约 ${videos} 条 ${seconds} 秒视频`,
+      makes: (items: { videos: number; seconds: number }[]) => `可做 ${items.map((i) => `${i.videos} 条 ${i.seconds} 秒`).join('或 ')}视频`,
       bullets: ['积分永不过期', '支持全部时长', '高清 MP4 下载，无水印', '生成失败自动退积分'],
       note: '价格以美元计，税费由支付合作方在结账时计算。',
       guide: `购买前先看：怎样做出效果好的 ${k} 视频`,
@@ -247,15 +251,20 @@ export function zh(s: S): Content {
       refund: '退款政策',
       report: '举报内容',
       rights: `© ${new Date().getFullYear()} ${b}。保留所有权利。`,
+      agentDocs: 'AI 与 Agent 文档',
+      askAi: `看看 ChatGPT、Claude、Perplexity、Gemini 和 Grok 怎么介绍 ${b}。`,
+      askAiLabel: (ai: string) => `问 ${ai}：${b} 是什么`,
+      askAiPrompt: (url: string, llms: string) => `${b}（${url}）是什么？请介绍它能做什么、怎么收费、适合谁。给 AI 的站点说明：${llms}`,
     },
     support: { label: '帮助与支持' },
     consent: {
       title: '统计 Cookie',
-      body: '我们希望使用 Google Analytics Cookie 和一个记录来源链接的第一方 Cookie，了解网站的使用情况和哪些渠道有效。只有你点击“接受”后才会写入，之后也可以随时在页脚“Cookie 设置”里修改。',
+      body: '我们用 Google Analytics 和一个记录来源链接的第一方 Cookie 了解网站的使用情况。点“接受”后才会写入，之后可在页脚“Cookie 设置”里修改。',
       learnMore: '隐私政策',
       accept: '接受',
       reject: '拒绝',
       settings: 'Cookie 设置',
+      dismiss: '关闭',
     },
     signIn: {
       title: `登录 ${b}`,
@@ -471,6 +480,7 @@ export function zh(s: S): Content {
       already_redeemed: '你已经兑换过这个码了。',
       too_many_active_jobs: '你已有 3 个视频在生成中，请等待完成后再试。',
       maintenance: '系统维护中，请稍后再试。',
+      checkout_paused: '支付暂未开放，请稍后再来。',
       daily_limit: '今天的生成名额已满，请明天再试，本次没有扣积分。',
       rate_limited: '请求过于频繁，请稍后再试。',
       file_too_large: '文件超过 10 MB。',
@@ -528,8 +538,11 @@ export function zh(s: S): Content {
               s.referralRewardCredits > 0
                 ? '如果你打开了好友的邀请链接，我们会写入一个 Cookie（vt_ref，最多保留 30 天，注册后即删除），用于记录这次邀请。为防止滥用邀请奖励，邀请记录里保存的是你的 IP 地址加盐后的哈希值，不保存 IP 地址本身。邀请双方都看不到对方的账户信息。'
                 : '',
-              ga4Id || cfBeaconToken ? '' : '我们不使用第三方统计或广告 Cookie。',
+              ga4Id || cfBeaconToken || umamiWebsiteId ? '' : '我们不使用第三方统计或广告 Cookie。',
               cfBeaconToken ? '我们用 Cloudflare Web Analytics 统计页面浏览量，它不使用 Cookie，也不会跨网站追踪你。' : '',
+              umamiWebsiteId
+                ? '我们用 Umami 统计访问量，它从我们自己的域名加载，不写入 Cookie，也不保存你的 IP 地址；IP 地址只用于判断你所在的国家和统计独立访客。'
+                : '',
               ga4Id
                 ? '如果你在横幅中接受统计 Cookie，我们还会使用 Google Analytics。它会写入 Cookie（例如 _ga），并由 Google 处理你的 IP 地址和设备信息，为我们生成使用情况报告。在你点击“接受”之前不会加载 Google Analytics。你可以随时在页脚“Cookie 设置”中撤回同意，撤回时这些 Cookie 也会被删除。'
                 : '',
@@ -545,7 +558,7 @@ export function zh(s: S): Content {
                 },
               ]
             : []),
-          { h: '服务提供方', p: [`我们只使用少量数据处理方：云托管、存储与邮件发送、仅为你的请求处理照片的 AI 渲染服务、内容安全分类服务，以及作为记录商户（Merchant of Record）的支付服务${ga4Id || cfBeaconToken ? '；另有上文所述的统计服务' : ''}。`] },
+          { h: '服务提供方', p: [`我们只使用少量数据处理方：云托管、存储与邮件发送、仅为你的请求处理照片的 AI 渲染服务、内容安全分类服务，以及作为记录商户（Merchant of Record）的支付服务${ga4Id || cfBeaconToken || umamiWebsiteId ? '；另有上文所述的统计服务' : ''}。`] },
           { h: '你的权利', p: [`你可以随时下载或删除视频，也可以在“设置”中导出个人数据（JSON）或注销账号。其他隐私请求请发送邮件至 ${s.supportEmail}。`] },
         ],
       },

@@ -7,6 +7,7 @@ import { handleDeadLetterBatch, handleQueueBatch, runScheduledMaintenance } from
 import { runNotificationCron } from './server/notifications'
 import { isSeoPath } from './server/seo'
 import { SHARE_PAGE, loadShare, shareHttpStatus } from './server/shares'
+import { handleUmamiProxy } from './server/umami'
 import { isProduction } from './server/util'
 import type { VideoJobMessage } from './server/types'
 
@@ -26,6 +27,9 @@ export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext) {
     const url = new URL(request.url)
     const { pathname } = url
+    // Umami 同域代理（/s/script.js、/s/api/send）：不走页面和 API 逻辑
+    const umami = handleUmamiProxy(request, env)
+    if (umami) return withSecurityHeaders(await umami, env, url)
     const toHono = pathname.startsWith('/api/') || pathname.startsWith('/media/') || pathname.startsWith('/i/') || isSeoPath(pathname)
     // 页面统一无尾斜杠：/pricing/ → 301 /pricing（TanStack 默认 307，不传递权重）
     if (!toHono && pathname.length > 1 && pathname.endsWith('/') && (request.method === 'GET' || request.method === 'HEAD')) {

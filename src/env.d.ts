@@ -7,4 +7,5 @@ interface Env {
   STRIPE_SECRET_KEY?: string
   STRIPE_WEBHOOK_SECRET?: string
   PAYMENT_NOTIFY_WEBHOOK_URL?: string
+  RESEND_API_KEY?: string
 }

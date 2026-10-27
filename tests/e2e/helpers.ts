@@ -58,3 +58,36 @@ export async function uploadPhoto(request: APIRequestContext, buffer = readFileS
     multipart: { file: { name: 'photo.jpg', mimeType, buffer } },
   })
 }
+
+// ---- 套餐 / 时长 / 订阅的数值：一律从 site 推算，派生站改了定价这些用例也成立 ----
+
+export function pkg(id: string) {
+  const found = site.packages.find((p) => p.id === id)
+  if (!found) throw new Error(`site.packages 里没有套餐 ${id}`)
+  return found
+}
+
+export function plan(id: string) {
+  const found = site.plans.find((p) => p.id === id)
+  if (!found) throw new Error(`site.plans 里没有订阅 ${id}`)
+  return found
+}
+
+export function durationCredits(id: string) {
+  const found = site.durations.find((d) => d.id === id)
+  if (!found) throw new Error(`site.durations 里没有时长 ${id}`)
+  return found.credits
+}
+
+// 部分退款回收的积分：与 src/server/orders.ts 的 planRefund 同一公式（按金额比例四舍五入，封顶到剩余积分）
+export function clawbackCredits(order: { credits: number; priceCents: number }, refundedCents: number, alreadyRefundedCredits = 0) {
+  return Math.min(order.credits - alreadyRefundedCredits, Math.round((order.credits * refundedCents) / order.priceCents))
+}
+
+// 定价页年付卡片的“Save X%”：与 src/components/Pricing.tsx 的 yearlySaving 同一公式，没有可比月付时为 null
+export function yearlySavingPercent(yearly: { credits: number; priceCents: number; currency: string }) {
+  const monthly = site.plans.find((m) => m.interval === 'month' && m.credits === yearly.credits && m.currency === yearly.currency)
+  if (!monthly) return null
+  const percent = Math.round((1 - yearly.priceCents / (monthly.priceCents * 12)) * 100)
+  return percent > 0 ? percent : null
+}

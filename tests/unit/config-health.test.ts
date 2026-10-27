@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { REQUIRED_BINDINGS, checkConfig, type ConfigInput } from '#/server/config-health'
+import { sellingPlans, site } from '#/config/site'
 import { configBindings, findSiteTodos, parsePendingMigrations, parseSecretNames, readWranglerConfig, runDoctor } from '../../scripts/doctor.mjs'
 
 const SECRET = 'a'.repeat(64)
@@ -32,6 +33,7 @@ function ready(overrides: { vars?: Record<string, string>; secrets?: ConfigInput
       FAL_KEY: 'f',
       OPENAI_API_KEY: 'o',
       TURNSTILE_SECRET_KEY: 't',
+      RESEND_API_KEY: 're_x',
       ...overrides.secrets,
     },
     bindings: REQUIRED_BINDINGS,
@@ -124,6 +126,21 @@ describe('checkConfig', () => {
       expect.objectContaining({ key: 'bindings', message: expect.stringContaining('KV、VIDEO_QUEUE') }),
     ])
   })
+
+  it('发信渠道：生产环境没配 RESEND_API_KEY 提示 Workers Free 限制；配了则只在发件域名与站点不同时提示去 Resend 验证', () => {
+    const noKey = { secrets: { RESEND_API_KEY: undefined } }
+    expect(keys(ready(noKey))).toEqual(['warn:RESEND_API_KEY'])
+    expect(keys(ready({ secrets: { RESEND_API_KEY: '  ' } }))).toEqual(['warn:RESEND_API_KEY'])
+    expect(keys(ready({ secrets: { RESEND_API_KEY: true } }))).toEqual([])
+    // 与 Email Service Onboard 提示各说各的，不重复
+    expect(keys(ready({ ...noKey, vars: { EMAIL_FROM: 'noreply@other.ai' } }))).toEqual(['warn:RESEND_API_KEY', 'warn:EMAIL_FROM'])
+    expect(checkConfig(ready({ vars: { EMAIL_FROM: 'noreply@other.ai' } }))).toEqual([
+      expect.objectContaining({ key: 'EMAIL_FROM', message: expect.stringContaining('Resend') }),
+    ])
+    // 预发环境、EMAIL_FROM 为空时不提示 Workers Free
+    expect(keys(ready({ ...noKey, vars: { APP_ENV: 'staging' } }))).not.toContain('warn:RESEND_API_KEY')
+    expect(keys(ready({ ...noKey, vars: { EMAIL_FROM: '' } }))).toEqual(['warn:EMAIL_FROM'])
+  })
 })
 
 describe('doctor', () => {
@@ -148,7 +165,8 @@ describe('doctor', () => {
   // 把模板配置改成一份可上线的配置，再逐项破坏
   const deployable = (): Record<string, any> => ({
     ...structuredClone(template),
-    vars: { ...ready().vars, WAFFO_PRODUCTS: '{"starter":"a","party":"b","squad":"c","monthly":"d","yearly":"e"}', WAFFO_STORE_ID: 'STO_1' },
+    // doctor 按 site.packages 和 sellingPlans 核对商品表，站点改了积分包也不用改这里
+    vars: { ...ready().vars, WAFFO_PRODUCTS: JSON.stringify(Object.fromEntries([...site.packages, ...sellingPlans].map((p) => [p.id, `PROD_${p.id}`]))), WAFFO_STORE_ID: 'STO_1' },
     d1_databases: [{ ...template.d1_databases[0], database_id: 'b7c0f5d2-1111-2222-3333-444455556666' }],
     kv_namespaces: [{ binding: 'KV', id: '9f8e7d6c5b4a39281706f5e4d3c2b1a0' }],
     routes: [{ pattern: 'moonhop.ai', custom_domain: true }],

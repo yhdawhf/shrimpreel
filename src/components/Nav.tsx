@@ -253,7 +253,7 @@ export function LanguageLinks() {
           lang={link.tag}
           aria-current={link.current ? 'page' : undefined}
           onClick={withHash}
-          className={link.current ? 'font-semibold text-white' : 'text-[#f2ede4]/75 hover:text-white'}
+          className={link.current ? 'font-semibold text-footer-fg' : 'text-footer-fg/75 hover:text-footer-fg'}
         >
           {link.name}
         </a>

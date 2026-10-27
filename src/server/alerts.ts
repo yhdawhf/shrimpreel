@@ -1,10 +1,13 @@
+import { postChatMessage } from './chat-notify'
 import { sendEmails } from './email'
-import type { TemplateParams } from './email-templates'
+import { alertChatText, type TemplateParams } from './email-templates'
 import { adminAlerts } from './notifications'
+import { fetchVideoBalance, type VideoBalance } from './video-balance'
 
 // 健康检查（Cron 每 5 分钟）：统计最近一段时间的异常，超过阈值就给 ADMIN_EMAILS 发告警邮件，同时写 console.error。
 // 同一类告警在同一个时间桶（ALERT_BUCKET_HOURS）里只发一次：dedupe_key 带桶号，由发件箱唯一约束保证，
 // Cron 重叠执行也不会重发；问题持续存在时下一个时间桶再提醒。发信本身出问题时，以 Workers 日志里的 [alert] 为准。
+// 配置了 PAYMENT_NOTIFY_WEBHOOK_URL 时，每条告警同时发到聊天群（同一 kind 同一时间桶只发一次，用 KV 去重）。
 
 export const ALERT_BUCKET_HOURS = 6
 
@@ -22,6 +25,8 @@ export const ALERT_RULES = {
   dead_letter: { windowMinutes: 60, min: 1 },
   // 最近 1 小时有任务因服务商账户问题失败（PROVIDER_ACCOUNT_ERRORS）
   provider_account: { windowMinutes: 60, min: 1 },
+  // 视频服务商余额低于 lowUsd（美元）：Cron 每小时查一次余额（UTC 整点那次），不等任务失败。后台“测试连接”也用这个阈值提示
+  provider_balance: { windowMinutes: 60, lowUsd: 10 },
   // 创建超过 30 分钟仍未完成（jobs.ts 45 分钟时判超时退款）
   job_backlog: { windowMinutes: 30, min: 1 },
   // 最近 24 小时有处理失败、且之后没有重放成功的支付回调：用户可能付了款没到账
@@ -47,6 +52,8 @@ export interface HealthStats {
   webhookFailures: { count: number; latest: string | null }
   paymentReview: { count: number; latest: string | null }
   emailFailures: number
+  // 视频服务商余额；本次没查（每小时一次）、mock 或查不到时为 null
+  providerBalance: VideoBalance | null
 }
 
 export function evaluateHealth(stats: HealthStats): Alert[] {
@@ -65,6 +72,10 @@ export function evaluateHealth(stats: HealthStats): Alert[] {
   if (stats.deadLetters >= ALERT_RULES.dead_letter.min) alerts.push(alert('dead_letter', stats.deadLetters))
   const account = stats.providerAccount
   if (account.count >= ALERT_RULES.provider_account.min) alerts.push(alert('provider_account', account.count, { detail: account.detail }))
+  const balance = stats.providerBalance
+  if (balance && balance.amount < ALERT_RULES.provider_balance.lowUsd) {
+    alerts.push(alert('provider_balance', 1, { detail: `${balance.provider} 余额 ${balance.amount.toFixed(2)} ${balance.currency}` }))
+  }
   if (stats.backlog >= ALERT_RULES.job_backlog.min) alerts.push(alert('job_backlog', stats.backlog))
   const webhooks = stats.webhookFailures
   if (webhooks.count >= ALERT_RULES.payment_webhook.min) alerts.push(alert('payment_webhook', webhooks.count, { detail: webhooks.latest }))
@@ -80,6 +91,18 @@ export function alertBucket(now: number) {
   return new Date(Math.floor(now / size) * size).toISOString().slice(0, 13)
 }
 
+// 余额每小时只查一次：Cron 每 5 分钟跑一次，只在 UTC 分钟 < 5 的那次查（简单、无状态；Cron 偶尔漏跑一次就少查一小时）。
+// 查询失败（网络错误、非 2xx）只记日志，不告警、不影响其他检查。
+async function checkProviderBalance(env: Env, now: number): Promise<VideoBalance | null> {
+  if (new Date(now).getUTCMinutes() >= 5) return null
+  try {
+    return await fetchVideoBalance(env)
+  } catch (error) {
+    console.error('[alert] provider balance check failed', error instanceof Error ? error.message : String(error))
+    return null
+  }
+}
+
 // since：只给本地 e2e 用，把各统计窗口的起点固定到测试开始时刻，不受之前运行留下的数据影响
 export async function collectHealthStats(env: Env, now: number, since?: string): Promise<HealthStats> {
   const start = (kind: AlertKind) => since ?? new Date(now - ALERT_RULES[kind].windowMinutes * 60_000).toISOString()
@@ -93,6 +116,7 @@ export async function collectHealthStats(env: Env, now: number, since?: string):
   const accountCodes = PROVIDER_ACCOUNT_ERRORS.map(() => '?').join(', ')
   const reviewWhere = `e.status IN ('orphan', 'mismatch') AND e.created_at >= ?
     AND (e.status = 'orphan' OR NOT EXISTS (SELECT 1 FROM orders o WHERE o.id = e.order_id AND o.status IN ('paid', 'refunded')))`
+  const providerBalance = await checkProviderBalance(env, now)
   const [finished, topErrors, deadLetters, accountErrors, backlog, webhooks, latestWebhook, reviews, latestReview, emails] = await db.batch([
     db
       .prepare(
@@ -170,6 +194,23 @@ export async function collectHealthStats(env: Env, now: number, since?: string):
         : null,
     },
     emailFailures: n(emails),
+    providerBalance,
+  }
+}
+
+// 告警同步发到聊天群：同一 kind 同一时间桶只发一次（先查 KV 再写，Cron 重叠时可能极少量重复）。
+// 发送失败只记日志（不带地址，地址里有 token），不影响邮件和其他告警。
+export async function notifyAlertChat(env: Env, alert: Alert, bucket: string) {
+  const webhook = env.PAYMENT_NOTIFY_WEBHOOK_URL
+  if (!webhook) return
+  try {
+    const key = `alert_chat:${alert.kind}:${bucket}`
+    if (await env.KV.get(key)) return
+    // 先写再发：发送失败这个桶也不重试，避免群里被刷屏；失败原因在日志里
+    await env.KV.put(key, '1', { expirationTtl: (ALERT_BUCKET_HOURS + 1) * 3600 })
+    await postChatMessage(webhook, alertChatText(alert))
+  } catch (error) {
+    console.error('[alert] chat notify failed', alert.kind, error instanceof Error ? error.message : String(error))
   }
 }
 
@@ -181,6 +222,7 @@ export async function runHealthCheck(env: Env, options: { now?: number; since?: 
   for (const alert of alerts) {
     console.error('[alert]', JSON.stringify(alert))
     await sendEmails(env, adminAlerts(env, `admin_alert:${alert.kind}:${bucket}`, () => ({ template: 'admin_alert', params: alert })))
+    await notifyAlertChat(env, alert, bucket)
   }
   return { stats, alerts, bucket }
 }

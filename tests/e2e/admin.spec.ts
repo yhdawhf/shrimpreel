@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { expect, test } from '@playwright/test'
-import { ORIGIN, buyPackage, credits, devLogin, json, ledger, post, uniqueEmail } from './helpers'
+import { ORIGIN, buyPackage, clawbackCredits, credits, devLogin, json, ledger, pkg, post, uniqueEmail } from './helpers'
 
 // wrangler.jsonc 的 ADMIN_EMAILS 默认包含此邮箱
 const ADMIN_EMAIL = 'admin@example.com'
@@ -96,38 +96,41 @@ test('管理员退款：参数校验、补登后迟到的同号 webhook 不重�
   const buyer = await playwright.request.newContext({ baseURL: ORIGIN })
   try {
     await devLogin(buyer, uniqueEmail('admin-refund'))
-    const orderId = await buyPackage(buyer, 'starter') // 20 积分 / $9.90
+    const starter = pkg('starter')
+    const partialCents = Math.min(330, starter.priceCents - 1) // 补登的部分退款金额，模板价 $9.90 下是 $3.30
+    const partial = clawbackCredits(starter, partialCents)
+    const orderId = await buyPackage(buyer, 'starter')
     await devLogin(page.request, ADMIN_EMAIL)
     const refund = (data: Record<string, unknown>) => post(page.request, `/api/admin/orders/${orderId}/refund`, data)
     const rejected = async (data: Record<string, unknown>, status = 400) => (await json<{ error: string }>(refund(data), status)).error
     type OrderView = { status: string; refundedAmountCents: number; refundedCredits: number }
     const orderView = async () => (await json<{ order: OrderView }>(buyer.get(`/api/orders/${orderId}`))).order
 
-    expect(await rejected({ amountCents: 330 })).toBe('note_required')
-    expect(await rejected({ note: 'e2e', amountCents: 991 })).toBe('invalid_amount')
+    expect(await rejected({ amountCents: partialCents })).toBe('note_required')
+    expect(await rejected({ note: 'e2e', amountCents: starter.priceCents + 1 })).toBe('invalid_amount')
     expect(await rejected({ note: 'e2e', amountCents: 0 })).toBe('invalid_amount')
     expect(await rejected({ note: 'e2e', amountCents: 3.3 })).toBe('invalid_amount')
-    expect(await credits(buyer)).toBe(20)
+    expect(await credits(buyer)).toBe(starter.credits)
 
-    // 补登 $3.30：回收 round(20 × 330 / 990) = 7
+    // 补登部分金额：按金额比例回收（公式同服务端 planRefund）
     const refundId = `${orderId}_late`
-    const local = await json<{ requested: boolean; refunded: boolean }>(refund({ note: 'webhook 丢失补登', amountCents: 330, mode: 'local', refundId }))
+    const local = await json<{ requested: boolean; refunded: boolean }>(refund({ note: 'webhook 丢失补登', amountCents: partialCents, mode: 'local', refundId }))
     expect(local).toMatchObject({ requested: false, refunded: true })
-    expect(await credits(buyer)).toBe(13)
-    expect(await orderView()).toMatchObject({ status: 'paid', refundedAmountCents: 330, refundedCredits: 7 })
+    expect(await credits(buyer)).toBe(starter.credits - partial)
+    expect(await orderView()).toMatchObject({ status: 'paid', refundedAmountCents: partialCents, refundedCredits: partial })
 
     // 同号 webhook 迟到：判为 duplicate，积分与订单记账都不变
-    const late = await json<{ status: string }>(post(buyer, '/api/mock-payments/complete', { orderId, outcome: 'refunded', eventId: refundId, amountCents: 330 }))
+    const late = await json<{ status: string }>(post(buyer, '/api/mock-payments/complete', { orderId, outcome: 'refunded', eventId: refundId, amountCents: partialCents }))
     expect(late.status).toBe('duplicate')
-    expect(await credits(buyer)).toBe(13)
-    expect(await orderView()).toMatchObject({ refundedAmountCents: 330, refundedCredits: 7 })
+    expect(await credits(buyer)).toBe(starter.credits - partial)
+    expect(await orderView()).toMatchObject({ refundedAmountCents: partialCents, refundedCredits: partial })
 
-    // 不填金额 = 退剩余 $6.60，回收剩余 13 积分，订单转 refunded，之后不能再退
+    // 不填金额 = 退剩余金额，回收剩余积分，订单转 refunded，之后不能再退
     expect(await json<{ refunded: boolean }>(refund({ note: '退剩余' }))).toMatchObject({ refunded: true })
     expect(await credits(buyer)).toBe(0)
-    expect(await orderView()).toMatchObject({ status: 'refunded', refundedAmountCents: 990, refundedCredits: 20 })
+    expect(await orderView()).toMatchObject({ status: 'refunded', refundedAmountCents: starter.priceCents, refundedCredits: starter.credits })
     expect(await rejected({ note: '再退一次' }, 409)).toBe('order_not_paid')
-    expect((await ledger(buyer)).filter((e) => e.reason === 'order_refund').map((e) => e.delta).sort((a, b) => a - b)).toEqual([-13, -7])
+    expect((await ledger(buyer)).filter((e) => e.reason === 'order_refund').map((e) => e.delta).sort((a, b) => a - b)).toEqual([-(starter.credits - partial), -partial].sort((a, b) => a - b))
 
     await page.goto('/admin/audit')
     await expect(page.getByTestId('admin-audit').locator('tbody tr').filter({ hasText: orderId })).toHaveCount(2)

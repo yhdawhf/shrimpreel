@@ -10,10 +10,16 @@ https://github.com/user-attachments/assets/895aab94-d0c9-474e-8d90-61a6c551e536
 
 72 秒功能介绍，无声（[英文版](README.md)；MP4 文件在 [docs/media](docs/media)）。画面来自本地运行，示例站 Neon Shuffle AI 和视频素材都是占位演示。
 
-> 状态：本地全流程可用（单元测试 + Playwright e2e），尚未作为正式站点部署。哪些已用真实服务验证、哪些还没有，见 [ROADMAP.md](ROADMAP.md)。
+## 用 ShrimpReel 做的站
+
+<a href="https://christmasdanceai.com/?utm_source=github&utm_medium=referral&utm_campaign=shrimpreel"><img src="docs/media/showcase-christmas-dance-ai.jpg" width="600" alt="Christmas Dance AI：一张照片生成精灵舞或圣诞派对舞视频"></a>
+
+[Christmas Dance AI](https://christmasdanceai.com/?utm_source=github&utm_medium=referral&utm_campaign=shrimpreel)：上传一张照片，变身小精灵在圣诞老人的工坊里跳舞，或穿自己的衣服跳圣诞派对舞。两种风格、Google 登录、积分包和订阅，都来自本模板。
+
+> 状态：本地全流程可用（单元测试 + Playwright e2e），上面的站点已在生产环境运行。模板本身不部署。哪些已用真实服务验证、哪些还没有，见 [ROADMAP.md](ROADMAP.md)。
 
 - 前端/SSR：TanStack Start（React 19）+ Tailwind 4，`/` 英文、`/zh` 中文
-- API：Hono（`/api/*`、`/media/*`、`/sitemap.xml`、`/robots.txt`、IndexNow key 文件），入口 `src/server.ts`
+- API：Hono（`/api/*`、`/media/*`、`/sitemap.xml`、`/robots.txt`、`/llms.txt`、IndexNow key 文件），入口 `src/server.ts`
 - 支付：Waffo Pancake（默认）、Dodo Payments，均为 MoR；也可用 Stripe（你自己是商户，销售税自己处理）；`mock` 仅用于本地和 e2e
 - 视频：fal.ai queue API（默认），可选 [yir.ai](https://yir.ai/?ref=qianshuixia) 网关或 [NanoAPI](https://nanoapi.ai)；`mock` 仅用于本地和 e2e。见下文“视频服务商”
 - 已具备：
@@ -26,7 +32,7 @@ https://github.com/user-attachments/assets/895aab94-d0c9-474e-8d90-61a6c551e536
     - 生成：按任务 ID、邮箱、服务商请求 ID 搜索
   - 交易邮件：积分到账、成片完成、生成失败退积分、举报回执（仅登录用户）与处理结果；管理员收新举报、超时提醒和新留言（Cloudflare Email Service，发件箱去重与重试）
   - 合规与内容安全：成片 AI 标识；照片 7 天、成片 30 天自动清理；举报下架（48 小时队列，同一张原图的全部成片一并删除并拉黑）；上传图片审核；联系和举报表单的 Turnstile 人机验证
-  - 运维与安全：后台免部署切换维护模式、全站公告和每日生成上限；健康检查告警邮件、付款即时通知（Telegram、飞书、Discord 等）、D1 每日备份到 R2、前端错误上报到 Workers 日志、CSP（Report-Only，每次请求一个 nonce）与 Permissions-Policy
+  - 运维与安全：后台免部署切换维护模式、暂停收款、新订单的收款渠道、全站公告和每日生成上限；健康检查告警邮件、付款即时通知（Telegram、飞书、Discord 等）、D1 每日备份到 R2、前端错误上报到 Workers 日志、CSP（Report-Only，每次请求一个 nonce）与 Permissions-Policy
   - 内容与 SEO：one-page 首页（How it works / What is 区块，可选的痛点和“自己拍 vs 用本站”对比区块）、可扩展的文章集合（`/guides` 列表页、相关文章）、法律页、联系表单；SSR 输出完整的 canonical、hreflang、JSON-LD 和 sitemap；文案按语言拆包；`npm run seo:check` 检查全站
 
 更新日志见 [CHANGELOG.md](CHANGELOG.md)。功能建议与后续规划见 [docs/SAAS_VIDEO_FEATURES.md](docs/SAAS_VIDEO_FEATURES.md) 和 [ROADMAP.md](ROADMAP.md)。SEO 规则、关键词规划和审计结果见 [docs/SEO_AUDIT.md](docs/SEO_AUDIT.md)。全部环境变量和 `site.ts` 上线字段见 [docs/env.md](docs/env.md)，新增支付商的步骤与 webhook 返回码约定见 [docs/payments.md](docs/payments.md)，订阅的开关、套餐和支付商配置见 [docs/subscriptions.md](docs/subscriptions.md)，改代码前的约定（积分、支付入账、双语文案、迁移、e2e）见 [AGENTS.md](AGENTS.md)。
@@ -74,9 +80,9 @@ npm run dev -- --host 127.0.0.1      # http://127.0.0.1:3000
    - `package.json`：`name`。
    - 删除 `wrangler.staging.jsonc`（模板自身的预发配置）。
 
-   积分包价格（`packages`）、订阅开关和套餐（`subscriptionsEnabled`、`plans`，开关设为 `false` 只卖积分包）、`durations`、`video.falModel` 按需在 `src/config/site.ts` 手改。套餐可加 `anchorPriceCents` 显示划线原价和折扣，只能填这个套餐真实卖过的价格（欧盟按降价前 30 天内最低价算），新站一般不填。
+   积分包价格（`packages`）、订阅开关和套餐（`subscriptionsEnabled`、`plans`，开关设为 `false` 只卖积分包）、`durations`、`video.falModel` 按需在 `src/config/site.ts` 手改。套餐可加 `anchorPriceCents` 显示划线原价和折扣，只能填这个套餐真实卖过的价格（欧盟按降价前 30 天内最低价算），新站一般不填。价格页每个包显示“可做 N 条 X 秒或 M 条 Y 秒视频”（买得起的最长和最短时长），包数是 2 或 4 时网格按包数排列。可以加一个正好够最短时长的单条包（如 6 积分 $4.99）给只想做一条的人；余额不足时生成器的主按钮直接下单够用的最便宜的包，不用先跳价格页。
 3. **改文案**：`src/content/en.ts`、`src/content/zh.ts`。文案通过 `{keyword}` 等变量套用。每个词至少要重写 hero、whatIs、ideas、FAQ 和两篇文章，首页正文要自然覆盖长尾词。首页的痛点（`problem`）和对比（`withWithout`）区块按新趋势改，写不出真实内容就设为 `null`，不渲染。整站只换关键词会被 Google 判为 [scaled content abuse](https://developers.google.com/search/docs/essentials/spam-policies#scaled-content)。
-   - **文章**：在 `site.ts` 的 `articles` 加一项（`key`、`slug`、发布和更新日期，可选 `related`），再在每种语言的 `articles` 里补同名 key，缺了 typecheck 会报错。文章页地址是 `/<slug>`，自动进入 `/guides` 列表、sitemap 和其它文章的“相关文章”。`trend`、`howTo` 两篇被首页直接链接，不要删。建议每站至少一篇 1,200 词以上的支柱页，加 4–6 篇长尾页（教程、灵感、排错、对比）。
+   - **文章**：在 `site.ts` 的 `articles` 加一项（`key`、`slug`、发布和更新日期，可选 `related`），再在每种语言的 `articles` 里补同名 key，缺了 typecheck 会报错。可选的 `cover` 是 `public/` 下 1200×630 的封面，显示在 `/guides` 卡片和文章顶部，并用作该文章的 `og:image` 和 Article 结构化数据的 `image`；不填就没有卡片图，分享图用 `public/og.png`。封面用 `node scripts/article-cover.mjs public/guides/<slug>.jpg --tag Guide --title "短标题" public/demo/original.mp4@1 public/demo/ai1.mp4@2` 从站点自己的视频截帧（也可以用图片）生成，带标题、分类标签和品牌名；`--layout` 可选 `row`、`before-after`（照片 → 成片）、`vs`、`hero`、`grid`、`full`（一张横图铺满）。选项见脚本开头；用 Playwright 的 Chromium 渲染，截视频帧需要 ffmpeg。文章页地址是 `/<slug>`，自动进入 `/guides` 列表、sitemap 和其它文章的“相关文章”。`trend`、`howTo` 两篇被首页直接链接，不要删。建议每站至少一篇 1,200 词以上的支柱页，加 4–6 篇长尾页（教程、灵感、排错、对比）。
    - 文案按语言拆包，浏览器只下载当前语言（含法律页全文）。组件里照常用 `getContent(locale)`；只有在根路由之外、渲染之前要用文案时，才需要先 `await loadContent(locale)`。
    - 加一种语言：在 `site.ts` 的 `LOCALES` 和 `LOCALE_META` 里登记，新建 `src/content/<locale>.ts`（类型与 `en.ts` 一致），再在 `src/lib/i18n.ts` 的 `loaders` 里加一行动态 import。
 4. **换素材**：
@@ -221,6 +227,9 @@ SMOKE_BASE_URL=https://video-template-staging.<子域名>.workers.dev SMOKE_EXPE
 
 ## 关键设计
 
+- **主题**：`site.theme` 选整站外观，写在 `<html data-skin>` 上，访客仍可切换亮色 / 暗色。`classic`（默认）：暖白纸张、品红强调、衬线标题、胶囊按钮；`acid`：锌黑 / 奶白、黄绿强调、无衬线粗标题、小圆角按钮。颜色、字体、圆角都是 `src/styles.css` 里的 CSS 变量，新增主题时在 `src/lib/theme.ts` 登记并写亮色、暗色两组变量（`tests/unit/theme.test.ts` 核对）。
+  - 统计同意卡片（只在填了 `ga4Id` 时出现）在右下角，不挡正文；“接受”和“拒绝”同样大小，× 只收起本次，不记录选择。
+  - 页脚“问问 AI”：链接 `/llms.txt`，并列出 ChatGPT、Claude、Perplexity、Gemini（Google AI Mode）、Grok 按钮，带一段预填提问（`footer.askAiPrompt`，含首页和 `llms.txt` 地址）在新标签打开，链接 `nofollow`。
 - **积分**：每笔变动都写流水，`idempotency_key` 唯一（`order:<id>`、`order_refund:<id>`、`generation:<id>` 等），与批次、余额更新在同一个 D1 batch 里，重复入账会整体回滚。
   - 批次：每次入账是一个批次（`credit_grants`），可以带到期时间。买的积分永不过期；注册赠送按运营设置里的有效期到期（默认 `site.signupBonusValidDays`，0 = 永不过期）；后台补发时可填有效期（1–3650 天）。
   - 扣费先扣最早到期的批次，永不过期的最后扣，从哪些批次扣了多少记在 `credit_allocations`。分配在 SQL 里完成，余额不足时整个 batch 回滚，并发扣费不会超扣。生成失败按明细原路退回；退款回收时先扣该订单买的批次。
@@ -234,8 +243,10 @@ SMOKE_BASE_URL=https://video-template-staging.<子域名>.workers.dev SMOKE_EXPE
   - 防刷：同一邀请人来自同一 IP（加盐哈希，IPv6 按 /64）的注册最多 `site.referralMaxPerIp` 个，超出的记为拒绝；每个邀请人任意 30 天内最多拿 `site.referralMonthlyCap` 次奖励；付款时邀请人已封禁或注销则不发。
   - 奖励和好友的购买入账在同一个 D1 batch 里写入，用断言行保证并发的首单只发一次。奖励订单发生退款（部分退款也算）时整笔回收邀请人的奖励，最多扣到 0，只回收一次。
   - 后台 `/admin/referrals` 按奖励数列出邀请人，并列出最近的邀请记录、状态和拒绝原因。导出我的数据只包含本人这一侧，不含对方的 ID、邮箱和 IP 哈希；功能开启时隐私政策会说明这个 Cookie 和哈希。
-- **运营设置**：`/admin/settings` 免部署调整非敏感参数：维护模式、各语言的全站公告、注册赠送积分与有效期、邀请奖励积分、全站每日生成上限（`src/server/settings.ts`）。只把和 `site.ts` 默认值不同的值存进 D1 的 `settings` 表；保存成默认值时删掉那一行，以后改 `site.ts` 仍然生效。读取走 KV 缓存（60 秒），修改最多约 1 分钟在各地生效。密钥仍放 wrangler secrets。每次修改写审计，记录前后值。
+- **运营设置**：`/admin/settings` 免部署调整非敏感参数：维护模式、暂停收款、各语言的全站公告、注册赠送积分与有效期、邀请奖励积分、全站每日生成上限（`src/server/settings.ts`）。只把和 `site.ts` 默认值不同的值存进 D1 的 `settings` 表；保存成默认值时删掉那一行，以后改 `site.ts` 仍然生效。读取走 KV 缓存（60 秒），修改最多约 1 分钟在各地生效。密钥仍放 wrangler secrets。每次修改写审计，记录前后值。
   - 维护模式：新的生成和下单返回 503 `maintenance`，前台每页顶部显示维护提示；登录、查看、下载和支付回调照常，管理员不受限制，便于维护期间验证。
+  - 暂停收款：支付商还没开通或临时出问题时用。价格页的购买按钮变成不可点的“支付即将开放”，顶部显示说明，新下单返回 503 `checkout_paused`；生成和已建订单的支付回调照常，管理员不受限制。
+  - 收款渠道：为新订单覆盖 `PAYMENT_PROVIDER`，留空跟随部署配置。保存前检查目标支付商的密钥、商品 ID 和 Key 模式，不全就拒绝并列出缺的键；已有订单的退款、查单和订阅续费仍走原支付商，各家 webhook 都要保持开着。`npm run doctor` 只看部署配置，后台概览的配置检查按实际生效的支付商。
   - 每日生成上限按 UTC 自然日统计创建的任务数（失败退款的也算），超出返回 429 `daily_limit`，不扣积分；并发提交由同一个 D1 batch 里的断言行兜底。0 = 不限。建议和服务商控制台的消费上限一起用。
   - 邀请奖励设为 0 即暂停邀请（隐藏卡片，链接不再绑定）。暂停期间付款的首单记为拒绝（`paused`），恢复后不会用之后的订单补发。`site.referralRewardCredits` 为 0 时这一项锁定，因为隐私政策按 `site.ts` 生成。
   - “测试连接”逐项探测 R2、KV、发信（给你发一封测试邮件）、支付（Dodo、Stripe：逐个套餐核对商品或 Price 的价格与 `site.ts` 是否一致，售价更低时报失败，因为这样的付款会被判金额不符而不入账；Stripe 还核对一次性/周期价格和扣款周期；Waffo：用不存在的订单号查单，验证签名和鉴权）、视频服务商（鉴权和余额，低于 5 美元提示）和图片审核（鉴权）。探测只读或自行清理，不建收银台、不提交任务，说明文字里的密钥值会被替换掉。
@@ -320,6 +331,7 @@ SMOKE_BASE_URL=https://video-template-staging.<子域名>.workers.dev SMOKE_EXPE
   - 配了站点密钥但没配 secret 时，两个表单返回 503，不会静默放行。
 - **统计与 Cookie**：在 `site.analytics` 配置，隐私政策的“Cookie 与统计”一节会按配置自动调整。
   - 推荐只填 `cfBeaconToken`（Cloudflare Web Analytics）：不写 Cookie，不需要同意横幅。
+  - Umami（可选）：填 `analytics.umamiWebsiteId` 和 `vars.UMAMI_ORIGIN`（实例地址，如 `https://umami.example.com`）。页面加载本站的 `/s/script.js`，上报到本站的 `/s/api/send`，由 Worker（`src/server/umami.ts`）代理，网页源码和 JS 里看不到实例域名。不写 Cookie，不受同意横幅控制；代理不转发 Cookie，访客 IP（`CF-Connecting-IP`）只用于判断国家和统计独立访客。只有 `APP_ENV=production` 才上报；本地 dev、e2e、staging 拿到的是空脚本，什么都不转发。`/admin` 后台页面不上报。
   - 填了 `ga4Id` 才启用 GA4，同时出现同意横幅和页脚 “Cookie settings”。采用 Consent Mode v2 basic 模式：访客接受前不加载 gtag.js，事件只进 `dataLayer`；广告类同意项始终为 denied。拒绝或撤回时删除 `_ga`、`_ga_*`、`_gid`（当前主机和各级父域）。选择存在 `localStorage` 的 `consent.analytics`，逻辑见 `src/lib/consent.ts`。
   - 来源归因写第一方 Cookie `vt_attr`（90 天）。填了 `ga4Id` 时它和 GA4 一样等访客接受后才写入：接受时补记本次访问的来源，拒绝或撤回时删除；没写 Cookie 的访客，注册和订单记为 direct，访问统计照常计数。没填 `ga4Id` 时没有横幅，`vt_attr` 直接写入；按欧盟 ePrivacy 的严格解释这也需要事先同意，主要面向欧盟用户时应启用横幅。逻辑见 `src/lib/attribution.ts`。
 - **导出我的数据**（GDPR 第 15、20 条）：个人中心设置页可下载 JSON（`GET /api/account/export`），包含账号、会话、订单、积分流水与批次、上传与生成记录、留言、本人提交的举报和发信记录；按用户限流。不含 R2 路径、服务商请求 ID、内部错误信息和成本，也不含他人针对本人视频的举报。媒体文件不打包，仍在保留期内的可从个人中心下载。字段清单见 `src/server/account-export.ts`。
@@ -348,6 +360,7 @@ SMOKE_BASE_URL=https://video-template-staging.<子域名>.workers.dev SMOKE_EXPE
   1. Cloudflare 控制台 → Compute > Email Service → Onboard Domain，添加站点域名（DNS 必须托管在 Cloudflare），按提示添加 SPF/DKIM 记录。
   2. 账号需要 Workers Paid 才能发给任意收件人。每月含 3,000 封，超出部分每千封 $0.35（[价格](https://developers.cloudflare.com/email-service/platform/pricing/)）。
   3. `vars.EMAIL_FROM` 改成 `noreply@<domain>`（`new-site.mjs` 会自动改），然后运行 `npm run db:migrate:remote` 应用 0004。
+- **可选：改走 Resend**（例如 Workers Free 上，Email Service 只能发给 Cloudflare 里已验证的地址）：注册 [Resend](https://resend.com/)，在 Domains 验证发件域名，创建 API Key，写进 `.dev.vars.production` 的 `RESEND_API_KEY` 后运行 `node scripts/sync-secrets.mjs --apply`（或 `npx wrangler secret put RESEND_API_KEY`）。配了 Key 且 `EMAIL_FROM` 非空时，全部邮件走 Resend，不再用 `send_email` binding（免费档每月 3000 封、每天 100 封；额度用完按限流重试）。到后台对“邮件”点“测试连接”确认，结果会注明走的渠道。不配 Key 则行为不变。
 - `EMAIL_FROM` 留空或没有 binding 时不发信，邮件记为“未发送”；配好后可在后台重发。本地 `wrangler dev` 只模拟发送，不要给 binding 加 `"remote": true`。
 
 ## 监控告警
@@ -359,6 +372,7 @@ SMOKE_BASE_URL=https://video-template-staging.<子域名>.workers.dev SMOKE_EXPE
 | 生成失败率 | 最近 1 小时完成的任务里失败 ≥ 3 个且占比 ≥ 30%（不含管理员手动失败、举报下架） | `/admin/generations` |
 | 死信 | 最近 1 小时有任务因队列消息重试耗尽被判失败 | `/admin/generations` |
 | 视频服务商账户 | 最近 1 小时有任务因没配密钥、密钥失效、yir、NanoAPI 余额不足或 Key 月度额度用完而失败（1 个就告警） | `/admin/generations` |
+| 视频服务商余额 | 每小时（UTC 整点那次 Cron）查一次 yir、NanoAPI、fal 的余额，低于 10 美元就告警，不等任务失败；查询失败只写日志 | `/admin/generations` |
 | 任务积压 | 有任务创建超过 30 分钟仍未完成 | `/admin/generations` |
 | 支付回调 | 最近 24 小时有处理失败的支付回调 | `/admin/events` |
 | 付款待核对 | 最近 24 小时有 paid 回调找不到订单，或金额、币种、商品和订单不一致（订单补单或退款后不再计入） | `/admin/events` |
@@ -367,8 +381,8 @@ SMOKE_BASE_URL=https://video-template-staging.<子域名>.workers.dev SMOKE_EXPE
 - **去重**：同一类告警每 6 小时（UTC 时间桶）最多发一次，`dedupe_key` 为 `admin_alert:<类型>:<桶>:<管理员邮箱>`。问题持续存在时，下一个时间桶再提醒。
 - **死信队列**：主队列消息重试 10 次（约 35 分钟）仍失败会进入 `<name>-jobs-dlq`。同一个 Worker 消费死信队列（`src/server.ts` 按队列名的 `-dlq` 后缀分流），把任务判为失败（`error_code = dead_letter`）并退积分，用户会收到生成失败邮件。新站点要同时创建两个队列（见“部署到 Cloudflare”），`new-site.mjs` 会一并改名。
 - **D1 备份失败**：不在上表的健康检查里；当天第 3 次导出仍失败时发一封 `backup_failed` 告警，见“合规与内容安全”的“数据库备份”。
-- **付款即时通知**：配置 secret `PAYMENT_NOTIFY_WEBHOOK_URL` 后，每笔订单首次入账（含续费和后台补单）往 Telegram、飞书 / Lark、Discord 或 Slack 群发一条消息：金额、套餐、积分、来源和订单号。地址格式见 [docs/env.md](docs/env.md)。发送失败只写日志，不影响入账；日志和报错里不出现 webhook 地址（里面带 token）。
-- 发信本身出问题（域名未验证、配额用完）时告警邮件也可能发不出去，此时以 Workers 日志里的 `[alert]` 为准。需要第二通道时，可以用 Workers Logpush 把日志推到外部监控服务，按 `[alert]` 设置通知。
+- **付款即时通知**：配置 secret `PAYMENT_NOTIFY_WEBHOOK_URL` 后，每笔订单首次入账（含续费和后台补单）往 Telegram、飞书 / Lark、Discord 或 Slack 群发一条消息：金额、套餐、积分、来源和订单号。地址格式见 [docs/env.md](docs/env.md)。发送失败只写日志，不影响入账；日志和报错里不出现 webhook 地址（里面带 token）。同一个地址也会收到上表的告警和 D1 备份失败（同一类告警每个时间桶一条，用 KV 去重）；飞书开了关键词校验时要加上“告警”。
+- 发信本身出问题（域名未验证、配额用完）时告警邮件也可能发不出去，此时以 Workers 日志里的 `[alert]` 为准。配了 `PAYMENT_NOTIFY_WEBHOOK_URL` 时聊天群就是第二通道；还要第三条通道时，可以用 Workers Logpush 把日志推到外部监控服务，按 `[alert]` 设置通知。
 - **前端错误**：浏览器里未捕获的异常、未处理的 Promise 拒绝和错误页渲染失败，由 `src/lib/error-report.ts` 用 `sendBeacon` 发到 `/api/client-error`，只写 Workers 日志：`[client-error] id=… kind=error|rejection|boundary page=… message=… stack=…`。
   - 错误页显示错误编号，用户反馈时在 Workers Logs 里搜 `id=<编号>` 即可找到堆栈。
   - 日志里邮箱打码，URL 去掉账号密码、query 和 hash，堆栈只留前 6 行；同一页面同一个错误只报一次，每页最多 5 条，接口按 IP 限流。跨域脚本的 `Script error.` 不报。
@@ -388,8 +402,8 @@ SANDBOX_PROVIDER=dodo E2E_PORT=3200 npm run test:sandbox   # 支付商 test 模�
 
 按风险分级的 e2e 验收目录和未覆盖项见 [tests/e2e/CATALOG.md](tests/e2e/CATALOG.md)。新增或改名用例时要同步更新，`npm test` 会核对两边是否一致。sandbox e2e 的前提、webhook 模式和测试卡见 [docs/payments.md](docs/payments.md) 的“sandbox e2e”。
 
-e2e 覆盖（64 个用例）：
-- 购买与生成：完整主路径（含中文站路径和 AI 角标）、支付失败、未登录回到结果页（邮箱在渲染前被 302 去掉）、余额不足、生成失败退款；3 路轮询并发处理同一任务时只落库一次、成片不被误删，后台显示成本与毛利。
+e2e 覆盖（70 个用例）：
+- 购买与生成：完整主路径（含中文站路径和 AI 角标）、余额不足时在生成器里直接买够用的最便宜的包（暂停收款时禁用）、支付失败、未登录回到结果页（邮箱在渲染前被 302 去掉）、余额不足、生成失败退款；3 路轮询并发处理同一任务时只落库一次、成片不被误删，后台显示成本与毛利。
 - 合规：
   - 保留期：进行中任务的原图不清理；到期原图不能再用；成片过期返回 410，个人中心显示已过期；重复清理是幂等的。
   - 举报下架：匿名在 `/report` 举报，管理员在后台下架。同一张原图的两条成片都被删除，无关成片保留，重新上传同一张图被拦截；已处理的举报不能再处理，处理结果写入审计。
@@ -399,7 +413,7 @@ e2e 覆盖（64 个用例）：
 - 积分批次：后台补发限时积分后，生成先扣它、失败原路退回，到期作废后账单页提示消失；余额只够一次时并发发起两个生成，一个成功一个 402。账务规则另有单元测试在 SQLite 上执行全部迁移核对。
 - 兑换码：后台生成一批并导出 CSV、停用其中一个；用户在设置页兑换，积分带有效期；重复兑换、次数用完、停用或格式不对的码、非管理员访问都被拒绝；可用 3 次的活动码被 5 个用户同时兑换，只有 3 个成功。
 - 邀请奖励：好友经设置页的链接注册、首单付款后邀请人只拿一次奖励；第二单、其他用户的订单、无效码和老用户都不发；首单退款后奖励只回收一次；同一 IP 超出上限的注册被拒绝，后台显示原因；导出数据只含本人这一侧。
-- 运营设置：只有管理员能读写，未知参数或越界值整体拒绝；注册赠送和有效期改后立即用于新用户，审计记前后值；维护模式下生成和下单返回 503，已建订单的付款照常入账，管理员不受限，中英文页面都显示提示条；公告按语言显示；每日上限返回 429 且不扣积分；后台页面只提交改动项，本地各项测试连接都正常。
+- 运营设置：只有管理员能读写，未知参数或越界值整体拒绝；注册赠送和有效期改后立即用于新用户，审计记前后值；维护模式下生成和下单返回 503，已建订单的付款照常入账，管理员不受限，中英文页面都显示提示条；暂停收款时下单返回 503 `checkout_paused`，中英文价格页按钮禁用，生成和已建订单照常；未知的收款渠道整体拒绝，下单仍走部署配置；公告按语言显示；每日上限返回 429 且不扣积分；后台页面只提交改动项，本地各项测试连接都正常。
 - 订阅：月付从定价页订阅、积分随当期作废、续费重放只入账一次、少付的转人工、扣款失败与恢复、账单页到期取消与撤销、客户门户、续费期间拒绝再订阅和注销、终止后可重新订阅；年付按月补发（Cron 重复执行不重发）、迟到的旧状态事件被忽略、退款只回收订阅积分并停止补发。
 - 告警与死信：任务进死信后判失败、只退一次积分；健康检查触发失败率和死信告警，同一时间桶重复执行不重发。
 - 交易邮件：支付回调重放只发一封、语言跟随用户；生成成功与失败各一封，重复判失败不重发；未登录举报不发回执、登录用户填本人邮箱才发，临近截止与超时提醒各一次、下架后通知举报人和作者且不再提醒；留言只提醒管理员；注销清除发件记录；后台邮件页。

@@ -10,6 +10,8 @@
 # 无 hash 的展示素材：换素材时改文件名，或接受最长 7 天的旧缓存
 /demo/*
   Cache-Control: public, max-age=604800
+/guides/*
+  Cache-Control: public, max-age=604800
 /og.png
   Cache-Control: public, max-age=604800
 /favicon.svg

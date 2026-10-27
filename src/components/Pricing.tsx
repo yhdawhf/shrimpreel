@@ -1,47 +1,14 @@
-import { useRouterState } from '@tanstack/react-router'
 import { Check } from 'lucide-react'
-import { useState, type ReactNode } from 'react'
-import { anchorPrice, formatPrice, sellingPlans, site, type SubscriptionPlan } from '#/config/site'
-import { api, errorCode } from '#/lib/api'
-import { track } from '#/lib/attribution'
-import { useContent, useLocale, useLocalePath } from '#/lib/i18n'
-import { signInHref, useSession } from '#/lib/session'
+import type { ReactNode } from 'react'
+import { anchorPrice, formatPrice, packageMakes, sellingPlans, site, type SubscriptionPlan } from '#/config/site'
+import { useCheckout } from '#/lib/checkout'
+import { useContent } from '#/lib/i18n'
 import { ErrorText, Spinner } from './ui'
 
 export function Pricing() {
   const c = useContent()
   const p = c.pricing
-  const locale = useLocale()
-  const lp = useLocalePath()
-  const pathname = useRouterState({ select: (s) => s.location.pathname })
-  const { user, config, loading } = useSession()
-  const [pending, setPending] = useState<string | null>(null)
-  const [error, setError] = useState<string | null>(null)
-  const shortest = site.durations[0]!
-
-  async function buy(packageId: string) {
-    if (!user) {
-      location.href = signInHref(config, pathname, lp('/sign-in'))
-      return
-    }
-    setError(null)
-    setPending(packageId)
-    const pack = site.packages.find((p) => p.id === packageId) ?? site.plans.find((p) => p.id === packageId)
-    if (pack) {
-      track('begin_checkout', {
-        value: pack.priceCents / 100,
-        currency: pack.currency,
-        items: [{ item_id: pack.id, item_name: pack.id, quantity: 1 }],
-      })
-    }
-    try {
-      const data = await api<{ orderId: string; url: string }>('/api/checkout', { json: { packageId, locale } })
-      location.href = data.url
-    } catch (err) {
-      setError(errorCode(err))
-      setPending(null)
-    }
-  }
+  const { buy, pending, error, checkoutPaused, paused, loading } = useCheckout()
 
   function buyButton(id: string, primary: boolean, label: string) {
     return (
@@ -49,11 +16,13 @@ export function Pricing() {
         type="button"
         onClick={() => buy(id)}
         // 会话还在加载时 user 为空，此时点击会把已登录用户误送去登录页
-        disabled={pending !== null || loading}
+        disabled={pending !== null || loading || paused}
         className={`${primary ? 'btn-primary' : 'btn-ghost'} mt-auto w-full`}
         data-testid={`buy-${id}`}
       >
-        {pending === id ? (
+        {paused ? (
+          p.paused
+        ) : pending === id ? (
           <>
             <Spinner /> {p.buying}
           </>
@@ -64,8 +33,17 @@ export function Pricing() {
     )
   }
 
+  // 按包数自适应列数；类名必须是完整字面量，Tailwind 才扫得到
+  const packCount: number = site.packages.length
+  const gridCols = packCount === 4 ? 'md:grid-cols-2 lg:grid-cols-4' : packCount === 2 ? 'md:grid-cols-2' : 'md:grid-cols-3'
+
   return (
     <div className="space-y-6">
+      {checkoutPaused ? (
+        <p role="status" className="mx-auto max-w-2xl rounded-xl bg-amber-100 px-4 py-3 text-center text-sm text-amber-900 dark:bg-amber-900/40 dark:text-amber-200" data-testid="checkout-paused">
+          {p.pausedNote}
+        </p>
+      ) : null}
       {sellingPlans.length ? (
         <>
           <div className="mx-auto max-w-2xl text-center">
@@ -81,11 +59,12 @@ export function Pricing() {
           <h3 className="pt-6 text-center font-display text-2xl">{p.packsTitle}</h3>
         </>
       ) : null}
-      <div className="grid gap-5 md:grid-cols-3">
+      <div className={`grid gap-5 ${gridCols}`}>
         {site.packages.map((pack) => {
           const info = p.packages[pack.id] ?? { name: pack.id, tagline: '' }
           const highlight = 'highlight' in pack && pack.highlight
           const anchor = anchorPrice(pack)
+          const makes = packageMakes(pack.credits)
           return (
             <div
               key={pack.id}
@@ -110,7 +89,7 @@ export function Pricing() {
                 ) : null}
               </p>
               <p className="mt-1 text-sm font-semibold">{p.credits(pack.credits)}</p>
-              <p className="text-xs text-muted">{p.approx(Math.floor(pack.credits / shortest.credits), shortest.seconds)}</p>
+              {makes.length ? <p className="text-xs text-muted">{p.makes(makes)}</p> : null}
               <ul className="my-6 space-y-2.5 text-sm">
                 {p.bullets.map((bullet) => (
                   <li key={bullet} className="flex items-start gap-2">

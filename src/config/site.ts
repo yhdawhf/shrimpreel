@@ -1,6 +1,8 @@
 // 上新词时主要改这个文件：关键词、品牌、模板视频、时长档位、积分包、文章 slug。
 // 文案在 src/content/<locale>.ts，通过 {keyword} 等变量自动套用。
 
+import type { ThemeName } from '#/lib/theme'
+
 export const LOCALES = ['en', 'zh'] as const
 export type Locale = (typeof LOCALES)[number]
 export const DEFAULT_LOCALE: Locale = 'en'
@@ -21,6 +23,8 @@ export const site = {
   // 社媒平台名称（用于 “Viral on TikTok” 之类标签）
   trendPlatform: 'TikTok',
   ogImage: '/og.png',
+  // 页面主题，可选值和效果见 src/lib/theme.ts
+  theme: 'classic' as ThemeName,
 
   // 生成模板的共用参数：provider 输出时长 = 源视频时长，所以每种风格的每个时长档位各有一段剪好的源视频（见 styles[].sources）。
   template: {
@@ -167,8 +171,10 @@ export const site = {
   // 新增文章：这里加一项，各语言 content 的 articles 补同名 key（缺了 typecheck 会报错）。
   // trend、howTo 两篇被首页直接链接，不要删。related 不填时推荐其余文章里最近更新的。
   // 日期写进 Article 的 datePublished/dateModified、页面上的“最后更新”和 sitemap lastmod，改正文时同步改 updatedAt
+  // cover 可选：public/ 下 1200×630 的图片路径，用在列表卡片、文章顶部、og:image 和 Article 的 image；
+  // 用 scripts/article-cover.mjs 从站点自己的视频截帧生成（带标题、标签，可选多种版式）。不填时卡片没有图，og:image 用站点默认图
   articles: [
-    { key: 'trend', slug: 'neon-shuffle-ai-trend', publishedAt: '2026-10-20', updatedAt: '2026-10-20' },
+    { key: 'trend', slug: 'neon-shuffle-ai-trend', publishedAt: '2026-10-20', updatedAt: '2026-10-20', cover: '/guides/neon-shuffle-ai-trend.jpg' },
     { key: 'howTo', slug: 'how-to-make-neon-shuffle-ai-video', publishedAt: '2026-10-20', updatedAt: '2026-10-20' },
   ],
 
@@ -190,10 +196,13 @@ export const site = {
 
   // 统计：推荐只填 cfBeaconToken（Cloudflare Web Analytics，不写 Cookie，不需要同意横幅）。
   // 填了 ga4Id 才启用 GA4：同时出现同意横幅和页脚“Cookie 设置”，访客接受前不加载 gtag.js（Consent Mode v2 basic 模式，见 lib/consent.ts）。
-  // 隐私政策的“Cookie 与统计”一节按这两项自动调整
+  // 填了 umamiWebsiteId 就在所有页面加载同域的 Umami 脚本（/s/script.js，由 Worker 代理，实例地址在 vars.UMAMI_ORIGIN，不进前端）；
+  // Umami 不写 Cookie，不受同意横幅控制。
+  // 隐私政策的“Cookie 与统计”一节按这三项自动调整
   analytics: {
     ga4Id: '',
     cfBeaconToken: '',
+    umamiWebsiteId: '',
   },
 } as const
 
@@ -273,6 +282,22 @@ export function anchorPrice(pack: CreditPackage): { cents: number; percentOff: n
   return { cents: anchor, percentOff: Math.round((1 - pack.priceCents / anchor) * 100) }
 }
 
+// 积分包能做几条视频：列出“买得起的最长时长”和“最短时长”（相同则只列一项），没有买得起的时长时返回空数组
+export function packageMakes(credits: number): { videos: number; seconds: number }[] {
+  const affordable = site.durations.filter((d) => d.credits <= credits)
+  if (!affordable.length) return []
+  const bySeconds = [...affordable].sort((a, b) => a.seconds - b.seconds)
+  const shortest = bySeconds[0]!
+  const longest = bySeconds[bySeconds.length - 1]!
+  const items = longest === shortest ? [longest] : [longest, shortest]
+  return items.map((d) => ({ videos: Math.floor(credits / d.credits), seconds: d.seconds }))
+}
+
+// 积分 ≥ shortfall 的积分包里最便宜的一个（只看一次性积分包，不含订阅）；没有够用的返回 undefined
+export function cheapestPackageCovering(shortfall: number) {
+  return site.packages.filter((p) => p.credits >= shortfall).sort((a, b) => a.priceCents - b.priceCents)[0]
+}
+
 export type ArticleKey = (typeof site.articles)[number]['key']
 export interface Article {
   key: ArticleKey
@@ -280,6 +305,7 @@ export interface Article {
   publishedAt: string
   updatedAt: string
   related?: readonly ArticleKey[]
+  cover?: string
 }
 export const ARTICLES: readonly Article[] = site.articles
 

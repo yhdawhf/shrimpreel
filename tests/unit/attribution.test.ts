@@ -34,6 +34,21 @@ describe('classifyTouch', () => {
     expect(classifyTouch({ referrer: 'https://www.example.com/pricing' }, 'example.com')).toMatchObject({ source: 'direct' })
     expect(classifyTouch({ referrer: 'not a url' })).toMatchObject({ source: 'direct' })
   })
+
+  it('Google 登录、支付商结账页回跳不算来源（accounts.google.com 不是 google organic）', () => {
+    for (const referrer of [
+      'https://accounts.google.com/',
+      'https://accounts.google.com.hk/',
+      'https://checkout.dodopayments.com/session/x',
+      'https://test.checkout.dodopayments.com/',
+      'https://checkout.waffo.ai/',
+      'https://checkout.stripe.com/c/pay/x',
+    ]) {
+      expect(classifyTouch({ referrer }), referrer).toMatchObject({ source: 'direct', medium: 'none' })
+    }
+    expect(classifyTouch({ referrer: 'https://accounts.google.com/', utm_source: 'github' })).toMatchObject({ source: 'github' })
+    expect(classifyTouch({ referrer: 'https://www.google.com/search' })).toMatchObject({ source: 'google', medium: 'organic' })
+  })
 })
 
 describe('parseAttribution', () => {

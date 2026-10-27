@@ -1,7 +1,8 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { site } from '#/config/site'
-import { alertBucket, evaluateHealth, type HealthStats } from '#/server/alerts'
+import { alertBucket, evaluateHealth, notifyAlertChat, type Alert, type HealthStats } from '#/server/alerts'
 import { renderEmail } from '#/server/email-templates'
+import { kvShim } from './d1-sqlite'
 
 function stats(overrides: Partial<HealthStats> = {}): HealthStats {
   return {
@@ -12,6 +13,7 @@ function stats(overrides: Partial<HealthStats> = {}): HealthStats {
     webhookFailures: { count: 0, latest: null },
     paymentReview: { count: 0, latest: null },
     emailFailures: 2,
+    providerBalance: null,
     ...overrides,
   }
 }
@@ -76,5 +78,67 @@ describe('admin_alert 邮件', () => {
     const webhook = renderEmail('admin_alert', { kind: 'payment_webhook', count: 1, total: null, windowMinutes: 1440, detail: null }, ctx)
     expect(webhook.text).toContain('https://example.test/admin/events')
     expect(webhook.text).not.toContain('详情')
+  })
+})
+
+function low(): Alert {
+  return { kind: 'provider_balance', count: 1, total: null, windowMinutes: 60, detail: 'yir 余额 3.00 USD' }
+}
+
+describe('provider_balance', () => {
+  it('余额低于 10 美元告警，等于或高于、没查到（null）不告警', () => {
+    const alerts = evaluateHealth(stats({ providerBalance: { provider: 'yir', amount: 9.5, currency: 'USD' } }))
+    expect(alerts).toEqual([{ kind: 'provider_balance', count: 1, total: null, windowMinutes: 60, detail: 'yir 余额 9.50 USD' }])
+    expect(kinds(stats({ providerBalance: { provider: 'yir', amount: 10, currency: 'USD' } }))).toEqual([])
+    expect(kinds(stats({ providerBalance: null }))).toEqual([])
+  })
+
+  it('告警邮件带余额详情和后台页面', () => {
+    const mail = renderEmail('admin_alert', low(), { siteUrl: 'https://example.test/', locale: 'en' })
+    expect(mail.text).toContain('详情：yir 余额 3.00 USD')
+    expect(mail.text).toContain('https://example.test/admin/generations')
+  })
+})
+
+describe('notifyAlertChat', () => {
+  const webhook = 'https://open.feishu.cn/open-apis/bot/v2/hook/SECRET-TOKEN'
+  const setup = (reply: () => Response = () => new Response('{"code":0}')) => {
+    const fetcher = vi.fn(async (..._args: unknown[]) => reply())
+    vi.stubGlobal('fetch', fetcher)
+    return fetcher
+  }
+  const envOf = (url?: string) => ({ PAYMENT_NOTIFY_WEBHOOK_URL: url, KV: kvShim() }) as unknown as Env
+
+  afterEach(() => vi.unstubAllGlobals())
+
+  it('同一 kind 同一桶只发一次，换桶或换 kind 再发；文本带品牌前缀和告警内容', async () => {
+    const fetcher = setup()
+    const env = envOf(webhook)
+    await notifyAlertChat(env, low(), '2026-10-20T06')
+    await notifyAlertChat(env, low(), '2026-10-20T06')
+    expect(fetcher).toHaveBeenCalledTimes(1)
+    const body = JSON.parse(String((fetcher.mock.calls[0]![1] as RequestInit).body)) as { content: { text: string } }
+    expect(body.content.text).toContain(`【${site.brandName}】`)
+    expect(body.content.text).toContain('yir 余额 3.00 USD')
+    await notifyAlertChat(env, low(), '2026-10-20T12')
+    await notifyAlertChat(env, { ...low(), kind: 'dead_letter' }, '2026-10-20T12')
+    expect(fetcher).toHaveBeenCalledTimes(3)
+  })
+
+  it('没配 webhook 不发也不写 KV', async () => {
+    const fetcher = setup()
+    const env = envOf(undefined)
+    await notifyAlertChat(env, low(), '2026-10-20T06')
+    expect(fetcher).not.toHaveBeenCalled()
+    expect((env.KV as unknown as ReturnType<typeof kvShim>).store.size).toBe(0)
+  })
+
+  it('发送失败只记日志（不带地址），不抛出', async () => {
+    setup(() => new Response('', { status: 500 }))
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {})
+    await expect(notifyAlertChat(envOf(webhook), low(), '2026-10-20T06')).resolves.toBeUndefined()
+    expect(log).toHaveBeenCalled()
+    expect(JSON.stringify(log.mock.calls)).not.toContain('SECRET-TOKEN')
+    log.mockRestore()
   })
 })

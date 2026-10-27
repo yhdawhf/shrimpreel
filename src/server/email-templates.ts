@@ -92,6 +92,12 @@ const ALERTS_ZH: Record<AlertKind, (p: AlertParams) => { title: string; summary:
     hint: '按错误码处理：provider_not_configured 是没配密钥；YIR_UNAUTHORIZED 是密钥失效；YIR_INSUFFICIENT_BALANCE 到 yir 后台充值；YIR_SPEND_LIMIT_EXCEEDED 调高 API Key 的月度额度；nanoapi_invalid_api_key 是 NanoAPI 密钥失效；nanoapi_insufficient_balance 到 NanoAPI 后台充值；nanoapi_account_suspended 是账户被停用，联系 NanoAPI 支持。',
     path: '/admin/generations',
   }),
+  provider_balance: (p) => ({
+    title: '视频服务商余额不足',
+    summary: `${p.detail ?? '余额偏低'}，已低于预警线。余额耗尽后所有生成任务都会失败（失败会退积分）。`,
+    hint: '请尽快到视频服务商后台充值；高峰期前建议多充一些。余额每小时检查一次，持续偏低每 6 小时提醒一次。',
+    path: '/admin/generations',
+  }),
   job_backlog: (p) => ({
     title: `${p.count} 个任务积压`,
     summary: `${p.count} 个生成任务创建超过 ${span(p.windowMinutes)}仍未完成，超时后会自动判失败并退积分。`,
@@ -122,6 +128,12 @@ const ALERTS_ZH: Record<AlertKind, (p: AlertParams) => { title: string; summary:
     hint: '在 Workers 日志里搜索 "d1 backup failed"。数据库过大导致超时或超内存时，改用 wrangler d1 export 手动导出；D1 Time Travel 仍可恢复 30 天内的任意时刻。',
     path: '/admin',
   }),
+}
+
+// 告警的聊天群纯文本（alerts.ts 发到 PAYMENT_NOTIFY_WEBHOOK_URL），内容与告警邮件同源
+export function alertChatText(p: AlertParams) {
+  const alert = ALERTS_ZH[p.kind](p)
+  return [`【${brand}】告警：${alert.title}`, alert.summary, p.detail ? `详情：${p.detail}` : '', alert.hint].filter(Boolean).join('\n')
 }
 
 const USER_TEMPLATES: { [K in UserTemplate]: Record<Locale, Render<K>> } = {

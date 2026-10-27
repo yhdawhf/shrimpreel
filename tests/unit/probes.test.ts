@@ -50,7 +50,7 @@ const stripePrice = (override: Record<string, Record<string, unknown>> = {}) => 
   }
 }
 
-const probe = (target: Parameters<typeof runProbe>[1], env: Record<string, unknown>) => runProbe(env as unknown as Env, target, admin)
+const probe = (target: Parameters<typeof runProbe>[1], env: Record<string, unknown>) => runProbe({ KV: { get: async () => ({}) }, ...env } as unknown as Env, target, admin)
 
 afterEach(() => {
   vi.unstubAllGlobals()
@@ -198,6 +198,15 @@ describe('其他依赖', () => {
     const result = await probe('email', { EMAIL_FROM: 'noreply@example.com', EMAIL: { send } })
     expect(result.status).toBe('ok')
     expect(send).toHaveBeenCalledWith(expect.objectContaining({ to: admin.email, from: { email: 'noreply@example.com', name: site.brandName } }))
+    expect(result.message).toContain('Cloudflare')
+  })
+
+  it('配了 RESEND_API_KEY 时测试邮件走 Resend，说明里注明渠道', async () => {
+    const fetchMock = vi.fn(async (..._args: unknown[]) => new Response(JSON.stringify({ id: 'rs_1' }), { status: 200 }))
+    vi.stubGlobal('fetch', fetchMock)
+    const result = await probe('email', { EMAIL_FROM: 'noreply@example.com', RESEND_API_KEY: 're_probe_key_1234' })
+    expect(result).toMatchObject({ status: 'ok', message: expect.stringContaining('Resend') })
+    expect(fetchMock.mock.calls[0][0]).toBe('https://api.resend.com/emails')
   })
 
   it('KV 和 R2 写读删，不留下探测数据；R2 写入失败时 fail', async () => {

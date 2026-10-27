@@ -115,7 +115,7 @@ for (const key of ['publishedAt', 'updatedAt']) {
   siteSrc = replaceOnce(siteSrc, siteFile, `seo.${key} = ${date}`, new RegExp(`(\\n    ${key}: )'[^']*'`), `$1${q(date)}`)
 }
 // 以下属于旧站的身份信息，新站必须重新申请
-for (const key of ['googleVerification', 'bingVerification', 'indexNowKey', 'ga4Id', 'cfBeaconToken']) {
+for (const key of ['googleVerification', 'bingVerification', 'indexNowKey', 'ga4Id', 'cfBeaconToken', 'umamiWebsiteId']) {
   siteSrc = replaceOnce(siteSrc, siteFile, `${key} 清空`, new RegExp(`(\\n    ${key}: )'[^']*'`), `$1''`)
 }
 siteSrc = replaceOnce(siteSrc, siteFile, 'seo.sameAs 清空', /(\n    sameAs: )\[[^\]]*\]/, '$1[]')
@@ -192,6 +192,7 @@ console.log(`
 1. 重写趋势专属文案（只换关键词会被判定为模板站）：src/content/en.ts 与 zh.ts 的 hero、whatIs、ideas、faq、guides、articles.trend、articles.howTo。
    首页正文要自然覆盖长尾词：${secondaryKeywords.join('、')}${hardcoded.length ? `\n   写死旧关键词 "${oldKeyword}" 的行：${hardcoded.join(', ')}` : ''}${extraArticles.length ? `\n   旧站的其他文章（${extraArticles.join('、')}）：重写，或从 site.articles 和两份文案里删掉` : ''}
 2. 换素材：public/demo/*（自有或已授权，并在 site.styles[].examples.*.credit 写来源）、public/og.png（1200×630）、public/favicon.svg。
+   文章封面（site.articles[].cover）换完 demo 后重新截帧：node scripts/article-cover.mjs public/guides/<slug>.jpg --tag Guide --title "…" public/demo/original.mp4@1 public/demo/ai1.mp4@2（版式等选项见脚本开头）
    生成用源视频${missingSources.length ? `（缺 ${missingSources.length} 个）` : ''}：${sourceFiles.join('、')}
 3. Cloudflare 资源（把 database_id、KV id 写回 wrangler.jsonc）：
    npx wrangler d1 create ${name}

@@ -4,6 +4,7 @@
 // 拒绝或撤回时删除。没同意的访客注册、下单时没有归因 Cookie，记为 direct；访问上报不写 Cookie，照常发送。
 
 import { readConsent, type Consent } from './consent'
+import { isTransitHost } from './referrer'
 
 const COOKIE = 'vt_attr'
 const MAX_AGE = 90 * 86400
@@ -42,7 +43,7 @@ function currentTouch(): Touch {
   if (document.referrer) {
     try {
       const ref = new URL(document.referrer)
-      if (ref.hostname !== location.hostname) touch.referrer = `${ref.origin}${ref.pathname}`.slice(0, 200)
+      if (ref.hostname !== location.hostname && !isTransitHost(ref.hostname)) touch.referrer = `${ref.origin}${ref.pathname}`.slice(0, 200)
     } catch {
       // 非法 referrer 忽略
     }

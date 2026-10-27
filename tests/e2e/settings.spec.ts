@@ -1,5 +1,6 @@
 import { expect, test, type APIRequestContext } from '@playwright/test'
-import { ORIGIN, content, credits, devLogin, json, ledger, post, uniqueEmail, uploadPhoto } from './helpers'
+import { site } from '../../src/config/site'
+import { ORIGIN, content, credits, devLogin, durationCredits, json, ledger, post, uniqueEmail, uploadPhoto } from './helpers'
 
 // 运营设置是全站共享状态：每个用例前后都把所有参数恢复成默认值，避免影响其他用例
 const ADMIN_EMAIL = 'admin@example.com'
@@ -8,7 +9,7 @@ type SettingsView = {
   defaults: Record<string, unknown>
   overrides: Array<{ key: string; updatedBy: string | null }>
 }
-type AuditEntry = { action: string; target_type: string; target_id: string; detail: string | null; admin_email: string }
+type AuditEntry = { id: string; action: string; target_type: string; target_id: string; detail: string | null; admin_email: string }
 
 let admin: APIRequestContext
 
@@ -120,6 +121,76 @@ test('维护模式：新生成和下单返回 503，已建订单的支付回调�
   await expect(page.getByTestId('maintenance-notice')).toHaveCount(0)
 })
 
+test('暂停收款：价格页按钮变成“支付即将开放”，下单返回 503，生成和已建订单的回调照常，管理员不受限', async ({ page, request }) => {
+  await setSettings({ signupBonusCredits: 10 })
+  const { uploadId } = await userWithUpload(request)
+  const { orderId } = await json<{ orderId: string }>(post(request, '/api/checkout', { packageId: 'starter', locale: 'en' }))
+
+  await setSettings({ checkoutPaused: true })
+  expect(await json(post(request, '/api/checkout', { packageId: 'starter', locale: 'en' }), 503)).toEqual({ error: 'checkout_paused' })
+  await json(post(request, '/api/mock-payments/complete', { orderId, outcome: 'paid' }))
+  expect(await credits(request)).toBeGreaterThan(10)
+  await json(generate(request, uploadId), 201)
+  await json(post(admin, '/api/checkout', { packageId: 'starter', locale: 'en' }))
+
+  await page.goto('/pricing')
+  await expect(page.getByTestId('checkout-paused')).toHaveText(content.en.pricing.pausedNote)
+  await expect(page.getByTestId('buy-starter')).toBeDisabled()
+  await expect(page.getByTestId('buy-starter')).toHaveText(content.en.pricing.paused)
+  await page.goto('/zh/pricing')
+  await expect(page.getByTestId('buy-starter')).toHaveText(content.zh.pricing.paused)
+  await expect(page.getByTestId('maintenance-notice')).toHaveCount(0)
+  // 管理员也看到暂停说明，否则会以为开关没生效；按钮保持可点，便于验证
+  await devLogin(page.request, ADMIN_EMAIL)
+  await page.goto('/pricing')
+  await expect(page.getByTestId('checkout-paused')).toBeVisible()
+  await expect(page.getByTestId('buy-starter')).toHaveText(content.en.pricing.buy)
+  await expect(page.getByTestId('buy-starter')).toBeEnabled()
+
+  await setSettings({ checkoutPaused: false })
+  await page.goto('/pricing')
+  await expect(page.getByTestId('buy-starter')).toHaveText(content.en.pricing.buy)
+  await expect(page.getByTestId('buy-starter')).toBeEnabled()
+  await expect(page.getByTestId('checkout-paused')).toHaveCount(0)
+})
+
+test('暂停收款：生成器里的就地购买按钮对普通用户禁用并显示“支付即将开放”', async ({ page }) => {
+  const longest = site.durations[site.durations.length - 1]!
+  await devLogin(page.request, uniqueEmail('inline-paused'))
+  await setSettings({ checkoutPaused: true })
+
+  await page.goto('/')
+  await expect(page.getByTestId('generator-balance')).toBeVisible()
+  await page.getByTestId(`duration-${longest.id}`).click()
+  await expect(page.getByTestId('generator-buy')).toBeDisabled()
+  await expect(page.getByTestId('generator-buy')).toHaveText(content.en.pricing.paused)
+  await page.goto('/zh')
+  await expect(page.getByTestId('generator-balance')).toBeVisible()
+  await page.getByTestId(`duration-${longest.id}`).click()
+  await expect(page.getByTestId('generator-buy')).toHaveText(content.zh.pricing.paused)
+})
+
+test('收款渠道：非法渠道连同其它改动整体拒绝、不记审计，下单仍走部署配置；后台下拉显示当前 PAYMENT_PROVIDER', async ({ page, request }) => {
+  // 目标支付商配置不全时拒绝切换由 tests/unit/settings.test.ts 覆盖：本地 .dev.vars 各家配得是否齐全因人而异
+  const latestAudit = (await auditEntries())[0]?.id
+  const rejected = await json<{ message: string }>(post(admin, '/api/admin/settings', { values: { paymentProvider: 'paypal', maintenance: true } }), 400)
+  expect(rejected.message).toContain('收款渠道')
+  const view = await json<SettingsView>(admin.get('/api/admin/settings'))
+  expect(view.values).toMatchObject({ paymentProvider: '', maintenance: false })
+  expect((await auditEntries())[0]?.id).toBe(latestAudit)
+
+  await devLogin(request, uniqueEmail('provider'))
+  const { url } = await json<{ url: string }>(post(request, '/api/checkout', { packageId: 'starter', locale: 'en' }))
+  expect(url).toContain('/checkout/mock')
+
+  await devLogin(page.request, ADMIN_EMAIL)
+  await page.goto('/admin/settings')
+  const select = page.getByTestId('setting-paymentProvider')
+  await expect(select.locator('option').first()).toHaveText('跟随部署配置（PAYMENT_PROVIDER=mock）')
+  await expect(select.locator('option')).toHaveText(['跟随部署配置（PAYMENT_PROVIDER=mock）', 'Waffo', 'Dodo Payments', 'Stripe'])
+  await expect(select).toHaveValue('')
+})
+
 test('全站公告按语言显示，提交时压成一行；清空后不显示', async ({ page }) => {
   const view = await setSettings({ 'announcement.en': 'Spring sale: 20% off', 'announcement.zh': '  春季\n特惠   八折 ' })
   expect(view.values['announcement.zh']).toBe('春季 特惠 八折')
@@ -151,7 +222,7 @@ test('全站每日生成上限：达到上限后返回 429 且不扣积分，调
 
   await setSettings({ generationDailyCap: 0 })
   await json(generate(request, uploadId), 201)
-  expect(await credits(request)).toBe(before - 6)
+  expect(await credits(request)).toBe(before - durationCredits('short'))
 })
 
 test('后台运营设置页：只提交改动项、显示修改人、恢复默认；测试连接逐项给出结果并记审计', async ({ page }) => {

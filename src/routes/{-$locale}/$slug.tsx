@@ -2,7 +2,7 @@ import { createFileRoute, notFound } from '@tanstack/react-router'
 import { ArticleCards } from '#/components/ArticleCards'
 import { Breadcrumbs, formatDay } from '#/components/ui'
 import { findArticle, relatedArticles, site } from '#/config/site'
-import { getContent, localeFromParam, pageHead, useContent, useLocale, useLocalePath } from '#/lib/i18n'
+import { absoluteUrl, getContent, localeFromParam, pageHead, useContent, useLocale, useLocalePath } from '#/lib/i18n'
 import { articleJsonLd, breadcrumbJsonLd, jsonLdScript } from '#/lib/seo'
 
 // SEO 文章：slug 来自 site.articles。非文章 slug 不参与匹配，这样 /zh 会落到中文首页而不是被当成 slug
@@ -30,6 +30,15 @@ export const Route = createFileRoute('/{-$locale}/$slug')({
         { property: 'og:type', content: 'article' },
         { property: 'article:published_time', content: article.publishedAt },
         { property: 'article:modified_time', content: article.updatedAt },
+        // 覆盖根路由的 og:image（同名 meta 去重后留下这里的）；宽高跟着重写，保证排在 og:image 后面。封面固定 1200×630
+        ...(article.cover
+          ? [
+              { property: 'og:image', content: absoluteUrl(article.cover) },
+              { property: 'og:image:width', content: String(site.seo.ogImageSize.width) },
+              { property: 'og:image:height', content: String(site.seo.ogImageSize.height) },
+              { name: 'twitter:image', content: absoluteUrl(article.cover) },
+            ]
+          : []),
       ],
       scripts: [
         jsonLdScript(articleJsonLd(locale, path, text, article)),
@@ -61,6 +70,16 @@ function ArticlePage() {
       <p className="mt-4 text-sm text-muted">
         {c.common.lastUpdated}: <time dateTime={article.updatedAt}>{formatDay(article.updatedAt, locale)}</time>
       </p>
+      {article.cover ? (
+        <img
+          src={article.cover}
+          alt={text.title}
+          width={1200}
+          height={630}
+          fetchPriority="high"
+          className="mt-8 aspect-[1200/630] w-full rounded-2xl border border-line object-cover"
+        />
+      ) : null}
       <p className="mt-6 text-xl leading-9 text-muted">{text.intro}</p>
       <div className="prose-article mt-6">
         {text.sections.map((section) => (

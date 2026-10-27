@@ -102,3 +102,75 @@ test('语言链接：SSR 中可抓取，点击后保留路径、查询参数和 
   await expect(page.locator('html')).toHaveAttribute('lang', 'zh-CN')
   await expect(page.locator('h1')).toHaveText(zh.articles.howTo.title)
 })
+
+test('页脚“问问 AI”：SSR 中带 nofollow 链接，中文站用中文提问并附 llms.txt，llms.txt 可访问', async ({ page, request }) => {
+  const llms = await request.get('/llms.txt')
+  expect(llms.status()).toBe(200)
+  expect(await llms.text()).toContain(site.brandName)
+
+  // 不执行 JS 也能看到链接，且不传权重
+  const html = await (await request.get('/zh')).text()
+  expect(html).toMatch(/<a href="https:\/\/claude\.ai\/new\?q=[^"]+" target="_blank" rel="noopener nofollow"/)
+
+  await page.goto('/zh')
+  const links = page.getByTestId('ask-ai').getByRole('link')
+  await expect(links).toHaveCount(5)
+  const href = await page.getByRole('link', { name: zh.footer.askAiLabel('Claude') }).getAttribute('href')
+  const prompt = new URL(href!).searchParams.get('q')!
+  // 提问来自中文文案，带首页和 llms.txt 的绝对地址
+  const origin = `https://${site.domain}`
+  expect(prompt).toBe(zh.footer.askAiPrompt(origin, `${origin}/llms.txt`))
+  expect(prompt).not.toBe(en.footer.askAiPrompt(origin, `${origin}/llms.txt`))
+})
+
+test('文章封面：卡片和文章顶部显示，og:image 与 Article.image 用封面，SPA 切换后不残留；没填的用默认图', async ({ page, request }, testInfo) => {
+  const origin = `https://${site.domain}`
+  const withCover = ARTICLES.filter((a) => a.cover)
+  const without = ARTICLES.find((a) => !a.cover)
+  test.skip(!withCover.length, '没有文章填 cover')
+  // 每个封面文件都存在，路径写错时这里失败
+  for (const article of withCover) {
+    const response = await request.get(article.cover!)
+    expect(response.status(), article.cover).toBe(200)
+    expect(response.headers()['content-type'], article.cover).toMatch(/^image\//)
+  }
+
+  const ogImages = () => page.locator('meta[property="og:image"]').evaluateAll((els) => els.map((el) => el.getAttribute('content')))
+  const articleImage = () =>
+    page.locator('script[type="application/ld+json"]').evaluateAll((els) =>
+      els.map((el) => JSON.parse(el.textContent ?? '{}')).find((data) => data['@type'] === 'Article')?.image,
+    )
+  const covered = withCover[0]!
+
+  // SSR：og:image 只有一个，是封面
+  const html = await (await request.get(`/${covered.slug}`)).text()
+  expect(html.match(/property="og:image"/g)).toHaveLength(1)
+  expect(html).toContain(`<meta property="og:image" content="${origin}${covered.cover}"`)
+  // 宽高声明跟在 og:image 后面
+  expect(html.indexOf('property="og:image:width"')).toBeGreaterThan(html.indexOf('property="og:image"'))
+
+  await page.goto('/guides')
+  const cards = page.getByRole('main').getByRole('listitem')
+  await expect(cards.filter({ has: page.locator(`a[href$="/${covered.slug}"]`) }).locator('img')).toHaveAttribute('src', covered.cover!)
+  if (without) await expect(cards.filter({ has: page.locator(`a[href$="/${without.slug}"]`) }).locator('img')).toHaveCount(0)
+  await testInfo.attach('guides', { body: await page.screenshot({ fullPage: true }), contentType: 'image/png' })
+
+  // 列表 → 文章走 SPA 导航
+  await page.getByRole('link', { name: en.articles[covered.key].title }).first().click()
+  await expect(page).toHaveURL(new RegExp(`/${covered.slug}$`))
+  await expect(page.locator('article img').first()).toHaveAttribute('src', covered.cover!)
+  await expect.poll(ogImages).toEqual([`${origin}${covered.cover}`])
+  expect(await articleImage()).toEqual([`${origin}${covered.cover}`])
+
+  // 回到列表：og:image 恢复为站点默认图
+  await page.getByRole('navigation', { name: en.common.breadcrumb }).getByRole('link', { name: en.guides.title }).click()
+  await expect(page).toHaveURL(/\/guides$/)
+  await expect.poll(ogImages).toEqual([`${origin}${site.ogImage}`])
+
+  if (without) {
+    await page.goto(`/${without.slug}`)
+    expect(await ogImages()).toEqual([`${origin}${site.ogImage}`])
+    expect(await articleImage()).toEqual([`${origin}${site.ogImage}`])
+    await expect(page.locator('article > img')).toHaveCount(0)
+  }
+})

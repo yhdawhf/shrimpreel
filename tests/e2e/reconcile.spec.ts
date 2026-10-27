@@ -1,5 +1,8 @@
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test'
-import { ORIGIN, credits, devLogin, json, post, uniqueEmail } from './helpers'
+import { ORIGIN, credits, devLogin, json, pkg, post, uniqueEmail } from './helpers'
+
+const STARTER = pkg('starter').credits
+const PARTY = pkg('party').credits
 
 // wrangler.jsonc 的 ADMIN_EMAILS 默认包含此邮箱
 const ADMIN_EMAIL = 'admin@example.com'
@@ -36,8 +39,8 @@ test('webhook 丢失：成功页久等未到账时主动查单，订单入账并
   await expect(result).toHaveAttribute('data-status', 'pending')
   // 约 15 秒时触发第一次查单
   await expect(result).toHaveAttribute('data-status', 'paid', { timeout: 30_000 })
-  await expect(result).toContainText('20')
-  expect(await credits(page.request)).toBe(20)
+  await expect(result).toContainText(String(STARTER))
+  expect(await credits(page.request)).toBe(STARTER)
 })
 
 test('Cron 对账与查单接口：退避、并发只入账一次、迟到 webhook 不重复、越权与金额不符不自动处理', async ({ page, playwright }) => {
@@ -49,7 +52,7 @@ test('Cron 对账与查单接口：退避、并发只入账一次、迟到 webho
     const sweep = async (minutes: number) => json<Sweep>(post(buyer, '/api/dev/reconcile-sweep', { minutes }))
     const reconcile = (request: APIRequestContext, orderId: string) => post(request, `/api/orders/${orderId}/reconcile`)
 
-    const lost = await createOrder(buyer, 'party') // 60 积分
+    const lost = await createOrder(buyer, 'party')
     await payWithoutWebhook(buyer, lost)
     const unpaid = await createOrder(buyer, 'starter')
 
@@ -59,7 +62,7 @@ test('Cron 对账与查单接口：退避、并发只入账一次、迟到 webho
     expect(await credits(buyer)).toBe(0)
 
     expect(await sweep(11)).toEqual({ checked: 2, processed: 1, unpaid: 1 })
-    expect(await credits(buyer)).toBe(60)
+    expect(await credits(buyer)).toBe(PARTY)
     // 指数退避：未付订单要等年龄翻倍（11 → 22 分钟）才再查
     expect(await sweep(15)).toEqual({ checked: 0 })
     expect(await sweep(23)).toEqual({ checked: 1, unpaid: 1 })
@@ -68,23 +71,23 @@ test('Cron 对账与查单接口：退避、并发只入账一次、迟到 webho
     // 原本丢失的 webhook 迟到：订单已入账，不重复加积分
     const late = await json<{ status: string }>(post(buyer, '/api/mock-payments/complete', { orderId: lost, outcome: 'paid', eventId: `${lost}_late` }))
     expect(late.status).toBe('duplicate')
-    expect(await credits(buyer)).toBe(60)
+    expect(await credits(buyer)).toBe(PARTY)
 
     // 同一订单 5 个查单请求同时到达：只有一个真正查支付商并入账
-    const racy = await createOrder(buyer, 'starter') // 20 积分
+    const racy = await createOrder(buyer, 'starter')
     await payWithoutWebhook(buyer, racy)
     const results = await Promise.all([0, 1, 2, 3, 4].map(() => json<Reconciled>(reconcile(buyer, racy))))
     // 其余请求：占不到查单时间返回 throttled，读到订单时已入账则返回 skipped
     expect(results.filter((r) => r.reconcile === 'processed')).toHaveLength(1)
     expect(results.every((r) => ['processed', 'throttled', 'skipped'].includes(r.reconcile))).toBe(true)
-    expect(await credits(buyer)).toBe(80)
+    expect(await credits(buyer)).toBe(PARTY + STARTER)
     expect((await json<Reconciled>(reconcile(buyer, racy))).reconcile).toBe('skipped')
 
     // 查到的付款金额不足：和 webhook 一样记为不符、不入账，之后 Cron 不再自动查（只剩 unpaid 一单被查）
     const short = await createOrder(buyer, 'starter')
-    await payWithoutWebhook(buyer, short, { paidAmountCents: 100 })
+    await payWithoutWebhook(buyer, short, { paidAmountCents: Math.min(100, pkg('starter').priceCents - 1) })
     const shortResult = await json<Reconciled>(reconcile(buyer, short))
-    expect(shortResult).toMatchObject({ reconcile: 'mismatch', order: { status: 'pending' }, credits: 80 })
+    expect(shortResult).toMatchObject({ reconcile: 'mismatch', order: { status: 'pending' }, credits: PARTY + STARTER })
     expect(await sweep(60)).toEqual({ checked: 1, unpaid: 1 })
 
     // 后台查单：不符的订单提示人工核对；webhook 丢失的订单查到即入账，时间线有对账事件和审计
@@ -103,7 +106,7 @@ test('Cron 对账与查单接口：退避、并发只入账一次、迟到 webho
     const timeline = page.getByTestId('order-timeline')
     await expect(timeline).toContainText('reconcile')
     await expect(timeline).toContainText(`order.reconcile（${ADMIN_EMAIL}）`)
-    expect(await credits(buyer)).toBe(100)
+    expect(await credits(buyer)).toBe(PARTY + STARTER * 2)
   } finally {
     await buyer.dispose()
     await other.dispose()

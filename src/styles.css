@@ -3,8 +3,22 @@
 
 @custom-variant dark (&:where([data-theme='dark'], [data-theme='dark'] *));
 
-/* 颜色全部走 CSS 变量：换站时改这里的几行即可换肤 */
+/* 颜色、标题字体、圆角全部走 CSS 变量。主题由 site.theme 写到 <html data-skin>（见 src/lib/theme.ts），
+   每套主题要同时定义亮色和暗色（data-theme='dark'）。:root 是 classic 主题，其它主题只覆盖变量 */
 :root {
+  --font-display-family: 'Iowan Old Style', 'Palatino Linotype', Palatino, 'Book Antiqua', Georgia, 'Songti SC', 'STSong', serif;
+  --btn-radius: 9999px;
+  --card-radius: 1rem;
+  --field-radius: 0.75rem;
+  --btn-primary-bg: var(--ink);
+  --btn-primary-fg: var(--ink-fg);
+  /* 铺满 --accent 的背景上的文字色 */
+  --accent-fg: #ffffff;
+  --logo-bg: linear-gradient(135deg, var(--accent), #7b2cbf 55%, var(--accent-2));
+  --logo-fg: #ffffff;
+  /* 页脚两种模式下都是深色 */
+  --footer-bg: #151311;
+  --footer-fg: #f2ede4;
   --bg: #f7f4ee;
   --bg-soft: #efe9df;
   --card: #fffdf9;
@@ -37,6 +51,53 @@
   color-scheme: dark;
 }
 
+/* acid：锌黑 / 奶白 + 黄绿强调，无衬线粗标题，小圆角。
+   [data-skin='acid'] 写在 classic 暗色之后，会盖掉它，所以暗色一组（特异性更高）要把颜色全部重写 */
+[data-skin='acid'] {
+  --font-display-family: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', 'PingFang SC',
+    'Microsoft YaHei', sans-serif;
+  --btn-radius: 0.45rem;
+  --card-radius: 0.7rem;
+  --field-radius: 0.45rem;
+  --btn-primary-bg: var(--accent);
+  --btn-primary-fg: var(--accent-fg);
+  --accent-fg: oklch(18% 0 0);
+  --logo-bg: linear-gradient(var(--accent), var(--accent));
+  --logo-fg: oklch(18% 0 0);
+  --footer-bg: #0a0a0b;
+  --footer-fg: #fafafa;
+  --bg: oklch(96.5% 0.008 95);
+  --bg-soft: oklch(93.5% 0.01 95);
+  --card: oklch(99% 0.004 95);
+  --fg: oklch(14.1% 0.005 285.8);
+  --muted: oklch(48% 0.016 286);
+  --line: oklch(89% 0.008 90);
+  --ink: oklch(14.1% 0.005 285.8);
+  --ink-fg: oklch(98.5% 0 0);
+  --accent: oklch(90% 0.17 108);
+  /* 黄绿在浅底上对比度不够，小字改用深橄榄色 */
+  --accent-text: oklch(46% 0.11 115);
+  --accent-2: oklch(62% 0.13 200);
+  --glow: oklch(90% 0.17 108 / 0.28);
+  color-scheme: light;
+}
+
+[data-skin='acid'][data-theme='dark'] {
+  --bg: oklch(14.1% 0.005 285.8);
+  --bg-soft: oklch(18% 0.006 286);
+  --card: oklch(21% 0.006 285.9);
+  --fg: oklch(98.5% 0 0);
+  --muted: oklch(70.5% 0.015 286);
+  --line: oklch(100% 0 0 / 0.1);
+  --ink: oklch(98.5% 0 0);
+  --ink-fg: oklch(14.1% 0.005 285.8);
+  --accent: oklch(93% 0.2 112);
+  --accent-text: oklch(93% 0.2 112);
+  --accent-2: oklch(80% 0.12 200);
+  --glow: oklch(93% 0.2 112 / 0.1);
+  color-scheme: dark;
+}
+
 @theme inline {
   --color-bg: var(--bg);
   --color-bg-soft: var(--bg-soft);
@@ -49,7 +110,10 @@
   --color-accent: var(--accent);
   --color-accent-text: var(--accent-text);
   --color-accent-2: var(--accent-2);
-  --font-display: 'Iowan Old Style', 'Palatino Linotype', Palatino, 'Book Antiqua', Georgia, 'Songti SC', 'STSong', serif;
+  --color-accent-fg: var(--accent-fg);
+  --color-footer: var(--footer-bg);
+  --color-footer-fg: var(--footer-fg);
+  --font-display: var(--font-display-family);
   --font-sans: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', 'PingFang SC',
     'Microsoft YaHei', sans-serif;
   --font-mono: ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace;
@@ -68,7 +132,7 @@
   }
   ::selection {
     background: var(--accent);
-    color: white;
+    color: var(--accent-fg);
   }
   :focus-visible {
     outline: 2px solid var(--accent);
@@ -86,15 +150,18 @@
   .eyebrow {
     @apply text-xs font-medium tracking-[0.28em] uppercase;
   }
+  .brand-name {
+    @apply font-mono text-lg font-bold tracking-[0.12em] uppercase;
+  }
   /* Tailwind 4 的 @apply 不能引用自定义类，按钮基础样式用并列选择器共享；放在 components 层，页面上的 px-3 等工具类可覆盖 */
   .btn,
   .btn-primary,
   .btn-ghost,
   .btn-danger {
-    @apply inline-flex items-center justify-center gap-2 rounded-full px-5 py-3 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-50;
+    @apply inline-flex items-center justify-center gap-2 rounded-(--btn-radius) px-5 py-3 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-50;
   }
   .btn-primary {
-    @apply bg-ink text-ink-fg hover:opacity-90;
+    @apply bg-(--btn-primary-bg) text-(--btn-primary-fg) hover:opacity-90;
   }
   .btn-ghost {
     @apply border border-line bg-card text-fg hover:bg-bg-soft;
@@ -103,10 +170,10 @@
     @apply bg-red-600 text-white hover:bg-red-700;
   }
   .card {
-    @apply rounded-2xl border border-line bg-card;
+    @apply rounded-(--card-radius) border border-line bg-card;
   }
   .input {
-    @apply w-full rounded-xl border border-line bg-card px-3.5 py-2.5 text-sm text-fg outline-none placeholder:text-muted focus:border-fg;
+    @apply w-full rounded-(--field-radius) border border-line bg-card px-3.5 py-2.5 text-sm text-fg outline-none placeholder:text-muted focus:border-fg;
   }
   .chip {
     @apply inline-flex items-center gap-1.5 rounded-full border border-line bg-card px-3.5 py-1.5 text-sm;
@@ -140,6 +207,23 @@
   .table-admin td {
     @apply border-b border-line px-3 py-2 align-top;
   }
+}
+
+/* acid 的标题用粗无衬线、收紧字距，品牌名和顶栏链接不用全大写；不分层，盖过 font-normal 等工具类 */
+[data-skin='acid'] .font-display {
+  font-weight: 600;
+  letter-spacing: -0.025em;
+}
+[data-skin='acid'] .brand-name {
+  font-family: var(--font-sans);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  text-transform: none;
+}
+[data-skin='acid'] header .eyebrow {
+  font-size: 0.875rem;
+  letter-spacing: 0;
+  text-transform: none;
 }
 
 .hero-glow {

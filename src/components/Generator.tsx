@@ -1,9 +1,10 @@
 import { useRouterState } from '@tanstack/react-router'
 import { CircleAlert, CircleCheck, Download, Upload } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
-import { STYLES, defaultStyle, site } from '#/config/site'
+import { STYLES, cheapestPackageCovering, defaultStyle, formatPrice, site } from '#/config/site'
 import { api, errorCode, isActiveGeneration, type Generation } from '#/lib/api'
 import { track } from '#/lib/attribution'
+import { useCheckout } from '#/lib/checkout'
 import { useContent, useLocale, useLocalePath } from '#/lib/i18n'
 import { signInHref, useSession } from '#/lib/session'
 import { AiBadge, ErrorText, GoogleIcon, LocalLink, Spinner, formatDate } from './ui'
@@ -33,8 +34,11 @@ export function Generator({ styleId: controlledStyleId, onStyleChange }: { style
   const [error, setError] = useState<string | null>(null)
   const [generation, setGeneration] = useState<Generation | null>(null)
 
+  const checkout = useCheckout()
   const duration = site.durations.find((d) => d.id === durationId) ?? site.durations[0]!
   const shortfall = user ? Math.max(0, duration.credits - user.credits) : 0
+  // 余额不足时直接在这里下单够用的最便宜积分包；没有够用的包就退回去价格页
+  const coverPack = shortfall > 0 ? cheapestPackageCovering(shortfall) : undefined
 
   useEffect(() => () => {
     if (photo) URL.revokeObjectURL(photo.previewUrl)
@@ -261,6 +265,32 @@ export function Generator({ styleId: controlledStyleId, onStyleChange }: { style
           <a href={signInHref(config, pathname, lp('/sign-in'))} className="btn-primary w-full py-3.5" data-testid="generator-sign-up">
             <GoogleIcon /> {g.ctaSignUp}
           </a>
+        ) : shortfall > 0 && coverPack ? (
+          <>
+            <button
+              type="button"
+              className="btn-primary w-full py-3.5"
+              disabled={checkout.pending !== null || checkout.paused}
+              onClick={() => checkout.buy(coverPack.id)}
+              data-testid="generator-buy"
+            >
+              {checkout.paused ? (
+                c.pricing.paused
+              ) : checkout.pending === coverPack.id ? (
+                <>
+                  <Spinner /> {c.pricing.buying}
+                </>
+              ) : (
+                g.ctaBuyPack(coverPack.credits, formatPrice(coverPack.priceCents, coverPack.currency))
+              )}
+            </button>
+            <p className="text-center text-xs">
+              <LocalLink to="/pricing" className="text-muted underline" data-testid="generator-see-packs">
+                {g.seePacks}
+              </LocalLink>
+            </p>
+            <ErrorText code={checkout.error} />
+          </>
         ) : shortfall > 0 ? (
           <LocalLink to="/pricing" className="btn-primary w-full py-3.5" data-testid="generator-buy">
             {g.ctaBuy}

@@ -1,6 +1,8 @@
 import { DatabaseSync } from 'node:sqlite'
 import { beforeEach, describe, expect, it } from 'vitest'
-import { site } from '#/config/site'
+import { sellingPlans, site } from '#/config/site'
+import { activePaymentProviderId } from '#/server/payments'
+import { paymentProviderProblems } from '#/server/runtime-config'
 import { DEFAULT_SETTINGS, dailyCapGuard, generationsToday, getSettings, mergeSettings, parseSettingsPatch } from '#/server/settings'
 import { ApiError } from '#/server/util'
 import { type Stmt, d1Shim, kvShim, migrate } from './d1-sqlite'
@@ -111,5 +113,32 @@ describe('读取与每日上限（SQLite）', () => {
     expect(dailyCapGuard(db, 0, now)).toEqual([])
     await run([generation(now)])
     expect(await generationsToday(db, now)).toBe(3)
+  })
+})
+
+describe('后台切换收款渠道', () => {
+  const products = JSON.stringify(Object.fromEntries([...site.packages, ...sellingPlans].map((pack) => [pack.id, `prod_${pack.id}`])))
+  const env = (vars: Record<string, string>) => ({ APP_ENV: 'production', PAYMENT_PROVIDER: 'dodo', ...vars }) as unknown as Env
+
+  it('只看目标支付商自己的配置：密钥、商品 ID 齐全才放行，问题说明里不含密钥值', () => {
+    const ready = env({ WAFFO_MERCHANT_ID: 'MER_x', WAFFO_PRIVATE_KEY: 'secret-value', WAFFO_PRODUCTS: products, WAFFO_STORE_ID: 'STO_x', WAFFO_ENVIRONMENT: 'prod' })
+    expect(paymentProviderProblems(ready, 'waffo')).toEqual([])
+    // 当前 PAYMENT_PROVIDER（dodo）缺密钥不影响切到 waffo
+    const noProducts = paymentProviderProblems(env({ WAFFO_MERCHANT_ID: 'MER_x', WAFFO_PRIVATE_KEY: 'secret-value', WAFFO_PRODUCTS: '{}' }), 'waffo')
+    expect(noProducts.join()).toContain('WAFFO_PRODUCTS')
+    expect(noProducts.join()).not.toContain('secret-value')
+    expect(paymentProviderProblems(env({ STRIPE_PRODUCTS: products }), 'stripe').join()).toContain('STRIPE_SECRET_KEY')
+    // Key 模式和环境不一致（live 环境配了 test Key）也拦下
+    const mismatch = env({ STRIPE_SECRET_KEY: 'sk_test_x', STRIPE_WEBHOOK_SECRET: 'whsec_x', STRIPE_PRODUCTS: products, STRIPE_ENVIRONMENT: 'live' })
+    expect(paymentProviderProblems(mismatch, 'stripe').join()).toContain('test 模式')
+  })
+
+  it('覆盖值优先于 PAYMENT_PROVIDER；空值跟随部署配置；生产环境不接受 mock', () => {
+    expect(activePaymentProviderId(env({}), 'waffo')).toBe('waffo')
+    expect(activePaymentProviderId(env({}), '')).toBe('dodo')
+    expect(() => activePaymentProviderId(env({}), 'mock')).toThrow(ApiError)
+    expect(parseSettingsPatch({ paymentProvider: 'stripe' })).toEqual({ paymentProvider: 'stripe' })
+    expect(invalid({ paymentProvider: 'mock' })).toContain('收款渠道')
+    expect(invalid({ paymentProvider: 'paypal' })).toContain('收款渠道')
   })
 })

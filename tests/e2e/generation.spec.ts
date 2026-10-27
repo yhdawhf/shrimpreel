@@ -1,10 +1,13 @@
 import { expect, test } from '@playwright/test'
 import { STYLES, defaultStyle, formatPrice, site } from '#/config/site'
-import { ORIGIN, PHOTO, buyPackage, credits, devLogin, json, ledger, post, uniqueEmail, uploadPhoto } from './helpers'
+import { ORIGIN, PHOTO, buyPackage, credits, devLogin, durationCredits, json, ledger, pkg, post, uniqueEmail, uploadPhoto } from './helpers'
 
 type Generation = { id: string; status: string; videoUrl: string | null; templateId: string }
 
 const ADMIN_EMAIL = 'admin@example.com'
+const STARTER = pkg('starter').credits
+const SHORT = durationCredits('short')
+const FULL = durationCredits('full')
 
 test('余额不足返回 402，不产生任务也不产生流水', async ({ request }) => {
   await devLogin(request, uniqueEmail('broke'))
@@ -28,7 +31,7 @@ test('上传校验与越权：伪装 JPEG 返回 415，不能用别人的上传�
     await buyPackage(other, 'starter')
     const res = await json<{ error: string }>(post(other, '/api/generations', { uploadId: upload.id, durationId: 'short' }), 400)
     expect(res.error).toBe('invalid_upload')
-    expect(await credits(other)).toBe(20)
+    expect(await credits(other)).toBe(STARTER)
     // 别人的上传图片也不能直接读取
     expect((await other.get(`/media/uploads/${upload.id}`)).status()).not.toBe(200)
   } finally {
@@ -37,6 +40,7 @@ test('上传校验与越权：伪装 JPEG 返回 415，不能用别人的上传�
 })
 
 test('生成失败自动退回积分，失败任务没有视频', async ({ request }) => {
+  test.skip(STARTER < FULL, `starter(${STARTER}) 买不起 full(${FULL})，无法构造“扣 full 再退回”`)
   await devLogin(request, uniqueEmail('refund'))
   await buyPackage(request, 'starter')
   const { upload } = await json<{ upload: { id: string } }>(uploadPhoto(request), 201)
@@ -44,7 +48,7 @@ test('生成失败自动退回积分，失败任务没有视频', async ({ reque
     post(request, '/api/generations', { uploadId: upload.id, durationId: 'full', mockOutcome: 'fail' }),
     201,
   )
-  expect(await credits(request)).toBe(2)
+  expect(await credits(request)).toBe(STARTER - FULL)
 
   await expect
     .poll(async () => (await json<{ generation: Generation }>(request.get(`/api/generations/${generation.id}`))).generation.status, {
@@ -53,17 +57,18 @@ test('生成失败自动退回积分，失败任务没有视频', async ({ reque
     })
     .toBe('failed')
 
-  expect(await credits(request)).toBe(20)
+  expect(await credits(request)).toBe(STARTER)
   const entries = (await ledger(request)).filter((e) => e.ref_id === generation.id)
   expect(entries.map((e) => [e.reason, e.delta]).sort()).toEqual([
-    ['generation', -18],
-    ['generation_refund', 18],
+    ['generation', -FULL],
+    ['generation_refund', FULL],
   ])
   expect((await request.get(`/api/generations/${generation.id}/video`)).status()).toBe(404)
 })
 
 // fal webhook 只是“该去查一下”的信号，会和定时轮询同时处理同一个任务：只能一路落库，另一路不能删掉已落库的成片
 test('并发轮询只落库一次、成片不被误删；后台记录服务商成本与毛利，未出片的失败任务不记成本', async ({ request, page }) => {
+  test.skip(STARTER < 2 * SHORT, `starter(${STARTER}) 不够连续两次 short(${SHORT})`)
   await devLogin(request, uniqueEmail('race'))
   await buyPackage(request, 'starter')
   const start = async (mockOutcome: 'hang' | 'fail') => {
@@ -83,7 +88,7 @@ test('并发轮询只落库一次、成片不被误删；后台记录服务商�
   expect((await video.body()).length).toBeGreaterThan(10_000)
 
   await expect.poll(() => status(failed), { timeout: 60_000, intervals: [1000] }).toBe('failed')
-  expect(await credits(request)).toBe(14)
+  expect(await credits(request)).toBe(STARTER - SHORT)
 
   // mock 出片成本为 0（不是 NULL）；没出片的失败任务服务商不计费，成本为 NULL
   await devLogin(page.request, ADMIN_EMAIL)
@@ -98,7 +103,7 @@ test('并发轮询只落库一次、成片不被误删；后台记录服务商�
 
   await page.goto('/admin/generations')
   const cell = (id: string) => page.getByTestId('admin-generations').locator('tr', { hasText: id }).getByTestId('generation-cost')
-  await expect(cell(raced)).toHaveText(`$0.00毛利 ${formatPrice(Math.round(6 * perCredit!), 'USD')}`)
+  await expect(cell(raced)).toHaveText(`$0.00毛利 ${formatPrice(Math.round(SHORT * perCredit!), 'USD')}`)
   await expect(cell(failed)).toHaveText('—')
   await page.goto('/admin')
   await expect(page.getByTestId('admin-margin')).toContainText('近 30 天服务商成本')
@@ -115,12 +120,12 @@ test('风格：不带 styleId 用默认风格，不存在的风格返回 400 inv
 
   const bad = await start({ styleId: 'no-such-style' }, 400)
   expect(bad.error).toBe('invalid_style')
-  expect(await credits(request)).toBe(20)
+  expect(await credits(request)).toBe(STARTER)
   expect(((await json<{ generations: Generation[] }>(request.get('/api/generations'))).generations)).toHaveLength(0)
 
   const fallback = await start({ mockOutcome: 'hang' }, 201)
   expect(fallback.generation.templateId).toBe(defaultStyle.id)
-  expect(await credits(request)).toBe(14)
+  expect(await credits(request)).toBe(STARTER - SHORT)
 })
 
 test.describe('多风格站点', () => {

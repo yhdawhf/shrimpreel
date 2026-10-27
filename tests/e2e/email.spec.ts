@@ -1,7 +1,8 @@
 import { randomBytes } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { expect, test, type APIRequestContext } from '@playwright/test'
-import { ORIGIN, PHOTO, buyPackage, devLogin, json, post, uniqueEmail, uploadPhoto } from './helpers'
+import { formatPrice } from '#/config/site'
+import { ORIGIN, PHOTO, buyPackage, devLogin, durationCredits, json, pkg, post, uniqueEmail, uploadPhoto } from './helpers'
 
 // 本地 send_email binding 只模拟发送，不会真的发出；断言以发件箱（/api/dev/emails）为准
 const ADMIN_EMAIL = 'admin@example.com'
@@ -52,9 +53,9 @@ test('支付邮件：同一事件重放、换事件 ID 重复回调都只发一�
     locale: 'zh',
     status: 'sent',
     attempts: 1,
-    params: { orderId, credits: 20, amount: '$9.90' },
+    params: { orderId, credits: pkg('starter').credits, amount: formatPrice(pkg('starter').priceCents, pkg('starter').currency) },
   })
-  expect(emails[0].subject).toContain('20 个积分已到账')
+  expect(emails[0].subject).toContain(`${pkg('starter').credits} 个积分已到账`)
   expect(emails[0].provider_message_id).toBeTruthy()
 })
 
@@ -88,7 +89,7 @@ test('生成邮件：成功、失败退积分各一封，跟随用户最近使�
   expect(byTemplate.order_paid).toMatchObject({ locale: 'en', status: 'sent' })
   expect(byTemplate.generation_succeeded).toMatchObject({ locale: 'zh', status: 'sent', user_id: user.id })
   expect(byTemplate.generation_succeeded.params.expiresAt).toEqual(expect.any(String))
-  expect(byTemplate.generation_failed).toMatchObject({ locale: 'zh', status: 'sent', params: { generationId: bad, credits: 6 } })
+  expect(byTemplate.generation_failed).toMatchObject({ locale: 'zh', status: 'sent', params: { generationId: bad, credits: durationCredits('short') } })
   expect(byTemplate.generation_failed.subject).toContain('积分已退回')
 })
 

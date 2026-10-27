@@ -12,6 +12,7 @@ type Field =
   | { key: string; kind: 'bool'; label: string; help: string }
   | { key: string; kind: 'int'; label: string; help: string; min: number; max: number }
   | { key: string; kind: 'text'; label: string; help: string; maxLength: number }
+  | { key: string; kind: 'select'; label: string; help: string; options: Array<{ value: string; label: string }> }
 type Value = boolean | number | string
 type Data = {
   fields: Field[]
@@ -34,6 +35,8 @@ const PROBE_TONE = { ok: 'ok', warn: 'warn', fail: 'bad', skipped: 'muted' } as 
 const PROBE_LABEL = { ok: '正常', warn: '注意', fail: '失败', skipped: '未启用' } as const
 
 const toInput = (value: Value) => (typeof value === 'boolean' ? value : String(value))
+const defaultLabel = (field: Field, value: Value) =>
+  field.kind === 'select' ? (field.options.find((option) => option.value === value)?.label ?? String(value)) : String(value) || '空'
 const sameValue = (field: Field, input: Value, value: Value) => (field.kind === 'int' ? Number(input) === value : input === value)
 
 // 运营设置：不改代码就能调的非敏感参数（存 D1，KV 缓存约 60 秒生效），以及各外部服务的连接测试。密钥不在这里管理
@@ -101,6 +104,22 @@ function AdminSettings() {
                       <input type="checkbox" checked={value === true} onChange={(e) => setForm((f) => ({ ...f, [field.key]: e.target.checked }))} data-testid={`setting-${field.key}`} />
                       {field.label}
                     </label>
+                  ) : field.kind === 'select' ? (
+                    <label className="block space-y-1">
+                      <span className="font-medium">{field.label}</span>
+                      <select
+                        className="input"
+                        value={String(value ?? '')}
+                        onChange={(e) => setForm((f) => ({ ...f, [field.key]: e.target.value }))}
+                        data-testid={`setting-${field.key}`}
+                      >
+                        {field.options.map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
                   ) : (
                     <label className="block space-y-1">
                       <span className="font-medium">{field.label}</span>
@@ -120,7 +139,7 @@ function AdminSettings() {
                     {override ? <span>{`已修改：${override.updatedBy ?? '—'} · ${shortDate(override.updatedAt)}`}</span> : <span>使用默认值</span>}
                     {!isDefault && !locked ? (
                       <button type="button" className="underline" onClick={() => setForm((f) => ({ ...f, [field.key]: toInput(data.defaults[field.key]!) }))}>
-                        {`恢复默认（${String(data.defaults[field.key]) || '空'}）`}
+                        {`恢复默认（${defaultLabel(field, data.defaults[field.key]!)}）`}
                       </button>
                     ) : null}
                   </p>

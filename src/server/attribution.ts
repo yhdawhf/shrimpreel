@@ -2,6 +2,7 @@
 // 服务端在注册、下单、访问上报时读取并归类成 source / medium，写入 D1 供后台漏斗和来源报表使用。
 import type { Context } from 'hono'
 import { getCookie } from 'hono/cookie'
+import { isTransitHost } from '../lib/referrer'
 import { base64Decode } from './util'
 
 export const ATTRIBUTION_COOKIE = 'vt_attr'
@@ -117,7 +118,7 @@ export function classifyTouch(touch: Touch | undefined, selfHost?: string | null
   if (utmSource) return { source: utmSource, medium: lower(touch.utm_medium) ?? 'referral', campaign }
   if (touch.fbclid) return { source: 'facebook', medium: 'social', campaign }
   const host = hostOf(touch.referrer)
-  if (!host || host === selfHost?.replace(/^www\./, '')) return { source: 'direct', medium: 'none', campaign }
+  if (!host || host === selfHost?.replace(/^www\./, '') || isTransitHost(host)) return { source: 'direct', medium: 'none', campaign }
   const ai = match(host, AI_ASSISTANTS)
   if (ai) return { source: ai, medium: 'ai', campaign }
   const engine = match(host, SEARCH_ENGINES)

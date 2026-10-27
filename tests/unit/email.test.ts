@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { site } from '#/config/site'
 import { EMAIL_MAX_ATTEMPTS, attemptDelivery, emailConfig, type EmailConfig, type Mailer } from '#/server/email'
 import { renderEmail } from '#/server/email-templates'
@@ -7,7 +7,7 @@ const SITE_URL = 'https://example.test/'
 const NOW = Date.parse('2026-10-20T00:00:00.000Z')
 
 function config(send: Mailer['send']): EmailConfig {
-  return { mailer: { send: vi.fn(send) }, from: { email: 'noreply@example.test', name: site.brandName }, siteUrl: SITE_URL }
+  return { mailer: { send: vi.fn(send) }, from: { email: 'noreply@example.test', name: site.brandName }, siteUrl: SITE_URL, provider: 'cloudflare' }
 }
 
 function row(overrides: Partial<{ template: string; params: string; locale: string; attempts: number }> = {}) {
@@ -85,6 +85,89 @@ describe('emailConfig', () => {
     expect(emailConfig({ EMAIL_FROM: '   ', EMAIL: binding, SITE_URL } as Env)).toBeNull()
     expect(emailConfig({ EMAIL_FROM: 'noreply@example.test', SITE_URL } as unknown as Env)).toBeNull()
     expect(emailConfig({ EMAIL_FROM: ' noreply@example.test ', EMAIL: binding, SITE_URL } as Env)?.from.email).toBe('noreply@example.test')
+  })
+
+  it('没配 RESEND_API_KEY（或只有空白）仍用 binding；配了且有发件地址才走 Resend，不依赖 binding', () => {
+    expect(emailConfig({ EMAIL_FROM: 'noreply@example.test', EMAIL: binding, SITE_URL } as Env)).toMatchObject({ provider: 'cloudflare', mailer: binding })
+    expect(emailConfig({ EMAIL_FROM: 'noreply@example.test', EMAIL: binding, RESEND_API_KEY: ' \n', SITE_URL } as Env)?.provider).toBe('cloudflare')
+    expect(emailConfig({ EMAIL_FROM: 'noreply@example.test', RESEND_API_KEY: 're_x', SITE_URL } as unknown as Env)?.provider).toBe('resend')
+    expect(emailConfig({ EMAIL_FROM: '', EMAIL: binding, RESEND_API_KEY: 're_x', SITE_URL } as Env)).toBeNull()
+  })
+})
+
+describe('Resend 发信渠道', () => {
+  const KEY = 're_secret_key_123456'
+  const env = { EMAIL_FROM: 'noreply@example.test', RESEND_API_KEY: ` ${KEY}\n`, SITE_URL } as unknown as Env
+
+  afterEach(() => vi.unstubAllGlobals())
+
+  function stubFetch(status: number, body: unknown) {
+    const fetchMock = vi.fn(async (..._args: unknown[]) => new Response(JSON.stringify(body), { status }))
+    vi.stubGlobal('fetch', fetchMock)
+    return fetchMock
+  }
+  const deliver = (attempts = 1) => attemptDelivery(row({ attempts }), emailConfig(env)!, NOW)
+
+  it('请求形状：URL、鉴权头、JSON 字段；成功时返回 id', async () => {
+    const fetchMock = stubFetch(200, { id: 'rs_msg_1' })
+    const result = await deliver()
+    expect(result).toMatchObject({ status: 'sent', messageId: 'rs_msg_1' })
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    expect(url).toBe('https://api.resend.com/emails')
+    expect(init.method).toBe('POST')
+    expect(init.headers).toEqual({ Authorization: `Bearer ${KEY}`, 'Content-Type': 'application/json' })
+    expect(JSON.parse(init.body as string)).toEqual({
+      from: `${site.brandName} <noreply@example.test>`,
+      to: ['buyer@example.test'],
+      subject: result.subject,
+      text: expect.stringContaining('ord_1'),
+      html: expect.stringContaining('ord_1'),
+      reply_to: site.supportEmail,
+    })
+  })
+
+  it('429 每日 / 每月额度和限流：可重试，进入 pending 并带 retryAt', async () => {
+    for (const name of ['daily_quota_exceeded', 'monthly_quota_exceeded', 'rate_limit_exceeded']) {
+      stubFetch(429, { statusCode: 429, name, message: 'slow down' })
+      const result = await deliver()
+      expect(result).toMatchObject({ status: 'pending', retryAt: new Date(NOW + 5 * 60_000).toISOString() })
+      expect(result.status !== 'sent' && result.error).toContain(name.includes('quota') ? 'E_DAILY_LIMIT_EXCEEDED' : 'E_RATE_LIMIT_EXCEEDED')
+    }
+  })
+
+  it('5xx 和网络错误可重试', async () => {
+    stubFetch(503, { name: 'service_unavailable', message: 'down' })
+    expect(await deliver()).toMatchObject({ status: 'pending' })
+    vi.stubGlobal('fetch', async () => {
+      throw new Error('connect failed')
+    })
+    const result = await deliver()
+    expect(result).toMatchObject({ status: 'pending' })
+    expect(result.status !== 'sent' && result.error).toContain('E_INTERNAL_SERVER_ERROR')
+  })
+
+  it('域名未验证、key 无效等其它 4xx 不重试', async () => {
+    stubFetch(422, { statusCode: 422, name: 'invalid_parameter', message: 'The example.test domain is not verified' })
+    const unverified = await deliver()
+    expect(unverified).toMatchObject({ status: 'failed', retryAt: null })
+    expect(unverified.status !== 'sent' && unverified.error).toContain('E_RESEND_INVALID_PARAMETER')
+
+    stubFetch(401, { name: 'missing_api_key', message: 'Missing API key' })
+    expect(await deliver()).toMatchObject({ status: 'failed', retryAt: null })
+
+    stubFetch(403, 'not json')
+    const unreadable = await deliver()
+    expect(unreadable).toMatchObject({ status: 'failed' })
+    expect(unreadable.status !== 'sent' && unreadable.error).toContain('E_RESEND_403')
+  })
+
+  it('上游报错或网络错误回显了 key 时，错误信息里也抹掉', async () => {
+    stubFetch(422, { name: 'invalid_parameter', message: `bad request, key ${KEY}` })
+    expect(JSON.stringify(await deliver())).not.toContain(KEY)
+    vi.stubGlobal('fetch', async () => {
+      throw new Error(`boom Authorization: Bearer ${KEY}`)
+    })
+    expect(JSON.stringify(await deliver())).not.toContain(KEY)
   })
 })
 

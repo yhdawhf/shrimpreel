@@ -1,5 +1,8 @@
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test'
-import { buyPackage, credits, devLogin, json, ledger, ORIGIN, post, uniqueEmail } from './helpers'
+import { buyPackage, credits, devLogin, json, ledger, ORIGIN, pkg, plan, post, uniqueEmail, yearlySavingPercent } from './helpers'
+
+const MONTHLY = plan('monthly').credits
+const YEARLY = plan('yearly').credits
 
 type Result = { status: 'processed' | 'duplicate' | 'ignored' | 'orphan' | 'mismatch'; note?: string; orderId?: string }
 type Sub = { status: string; cancelAtPeriodEnd: boolean; currentPeriodEnd: string | null; nextGrantAt: string | null; planId: string }
@@ -24,19 +27,22 @@ test('月付：定价页订阅、积分当月作废、续费新建订单、扣�
   const request = page.request
   await devLogin(request, uniqueEmail('sub-monthly'))
   await page.goto('/pricing')
-  await expect(page.getByTestId('plan-yearly')).toContainText('Save 17%')
+  // 年付折扣：与定价页同一公式；没有可比的月付（积分不同）时不显示
+  const saving = yearlySavingPercent(plan('yearly'))
+  if (saving) await expect(page.getByTestId('plan-yearly')).toContainText(`Save ${saving}%`)
+  else await expect(page.getByTestId('plan-yearly')).not.toContainText(/Save \d+%/)
   await expect(page.getByTestId('buy-yearly')).toBeEnabled()
   await shot(page, 'pricing')
   await page.getByTestId('buy-monthly').click()
   await page.getByTestId('mock-pay').click()
   await expect(page.getByTestId('checkout-result')).toHaveAttribute('data-status', 'paid')
-  expect(await credits(request)).toBe(60)
+  expect(await credits(request)).toBe(MONTHLY)
 
   // 订阅积分带到期时间（当期结束），不是永久积分
   const sub = (await subscription(request))!
   expect(sub).toMatchObject({ status: 'active', planId: 'monthly', cancelAtPeriodEnd: false, nextGrantAt: null })
   const { expiring } = await json<{ expiring: Array<{ credits: number; expiresAt: string }> }>(request.get('/api/credits/expiring'))
-  expect(expiring).toEqual([{ credits: 60, expiresAt: sub.currentPeriodEnd }])
+  expect(expiring).toEqual([{ credits: MONTHLY, expiresAt: sub.currentPeriodEnd }])
 
   // 同一时间只能有一个订阅；还会续费时不能注销（否则支付商会继续扣款）
   expect((await json<{ error: string }>(checkout(request, 'yearly'), 409)).error).toBe('subscription_exists')
@@ -46,14 +52,14 @@ test('月付：定价页订阅、积分当月作废、续费新建订单、扣�
   const renewEventId = `renew_${Date.now()}`
   expect((await subEvent(request, 'renew', { eventId: renewEventId })).status).toBe('processed')
   expect((await subEvent(request, 'renew', { eventId: renewEventId })).status).toBe('duplicate')
-  expect(await credits(request)).toBe(120)
+  expect(await credits(request)).toBe(MONTHLY * 2)
   expect((await subEvent(request, 'renew')).status).toBe('processed')
-  expect(await credits(request)).toBe(180)
+  expect(await credits(request)).toBe(MONTHLY * 3)
   const list = await orders(request)
   expect(list.filter((o) => o.packageId === 'monthly' && o.status === 'paid')).toHaveLength(3)
   expect(new Set(list.map((o) => o.subscriptionId)).size).toBe(1)
   expect((await subEvent(request, 'renew', { paidAmountCents: 1 })).status).toBe('mismatch')
-  expect(await credits(request)).toBe(180)
+  expect(await credits(request)).toBe(MONTHLY * 3)
 
   // 扣款失败：账单页提示更新付款方式；支付商重试成功后恢复
   await subEvent(request, 'past_due')
@@ -92,17 +98,17 @@ test('年付：按月补发（重复执行不重发）、状态事件乱序、�
   await devLogin(request, uniqueEmail('sub-yearly'))
   const { orderId } = await json<{ orderId: string }>(checkout(request, 'yearly'))
   await json(post(request, '/api/mock-payments/complete', { orderId, outcome: 'paid', eventId: `${orderId}_paid` }))
-  expect(await credits(request)).toBe(60)
+  expect(await credits(request)).toBe(YEARLY)
   const sub = (await subscription(request))!
   expect(sub).toMatchObject({ status: 'active', planId: 'yearly' })
   expect(Date.parse(sub.nextGrantAt!) - Date.now()).toBeGreaterThan(27 * DAY)
 
   const grant = (days: number) => json<{ checked: number; granted: number; credits: number }>(post(request, '/api/dev/subscription-grants', { days }))
-  expect(await grant(0)).toMatchObject({ granted: 0, credits: 60 })
-  expect(await grant(31)).toMatchObject({ granted: 1, credits: 120 })
-  expect(await grant(31)).toMatchObject({ granted: 0, credits: 120 })
+  expect(await grant(0)).toMatchObject({ granted: 0, credits: YEARLY })
+  expect(await grant(31)).toMatchObject({ granted: 1, credits: YEARLY * 2 })
+  expect(await grant(31)).toMatchObject({ granted: 0, credits: YEARLY * 2 })
   const order = (await orders(request)).find((o) => o.id === orderId)!
-  expect(order).toMatchObject({ status: 'paid', credits: 120 })
+  expect(order).toMatchObject({ status: 'paid', credits: YEARLY * 2 })
 
   // 先到达的“更晚事件”生效，迟到的更早事件被忽略
   const later = new Date(Date.now() + 60_000).toISOString()
@@ -114,15 +120,15 @@ test('年付：按月补发（重复执行不重发）、状态事件乱序、�
 
   // 另买的积分包不受订阅退款影响
   await buyPackage(request, 'starter')
-  expect(await credits(request)).toBe(140)
+  expect(await credits(request)).toBe(YEARLY * 2 + pkg('starter').credits)
   expect((await json<Result>(post(request, '/api/mock-payments/complete', { orderId, outcome: 'refunded', eventId: `${orderId}_refund` }))).status).toBe(
     'processed',
   )
-  expect(await credits(request)).toBe(20)
+  expect(await credits(request)).toBe(pkg('starter').credits)
   const refund = (await ledger(request)).find((e) => e.reason === 'order_refund')
-  expect(refund).toMatchObject({ delta: -120, ref_id: orderId })
+  expect(refund).toMatchObject({ delta: -YEARLY * 2, ref_id: orderId })
 
   // 当期订单已退款：之后不再补发
-  expect(await grant(62)).toMatchObject({ granted: 0, credits: 20 })
+  expect(await grant(62)).toMatchObject({ granted: 0, credits: pkg('starter').credits })
   expect((await subscription(request))!.nextGrantAt).toBeNull()
 })

@@ -206,7 +206,8 @@ export async function runSeoCheck({ base = 'http://127.0.0.1:3000', production =
       if (!types.includes(type)) report('error', `缺少 JSON-LD ${type}`)
     }
     const imgs = [...html.matchAll(/<img\s[^>]*>/gi)].map((m) => m[0])
-    const noAlt = imgs.filter((tag) => !attr(tag, 'alt'))
+    // alt="" 是装饰图的正确写法（旁边已有同样的文字），只报完全没写 alt 的
+    const noAlt = imgs.filter((tag) => attr(tag, 'alt') === null)
     if (noAlt.length) report('warn', `${noAlt.length} 张图片缺少 alt`)
     // 内链：/guides 是文章枢纽，必须链到每一篇；首页至少链到 /guides
     if (kind === 'guides') {
@@ -238,6 +239,9 @@ export async function runSeoCheck({ base = 'http://127.0.0.1:3000', production =
   if (robotsTxt.response.status !== 200) sitewide('error', 'robots.txt 不可访问', `HTTP ${robotsTxt.response.status}`)
   else if (/^Disallow:\s*\/\s*$/m.test(robotsTxt.text)) sitewide(production ? 'error' : 'info', 'robots.txt 禁止全部抓取', production ? '正式站必须设置 APP_ENV=production' : '非生产环境的预期行为')
   else if (!robotsTxt.text.includes(`${origin}/sitemap.xml`)) sitewide('warn', 'robots.txt 未声明 sitemap')
+  const llmsTxt = await fetchText(`${base}/llms.txt`)
+  if (llmsTxt.response.status !== 200) sitewide('error', 'llms.txt 不可访问', `HTTP ${llmsTxt.response.status}`)
+  else if (!llmsTxt.text.startsWith('# ')) sitewide('error', 'llms.txt 不是以 "# 站点名" 开头', llmsTxt.text.slice(0, 40))
   if (production) {
     const hsts = (await fetch(`${base}/`, { redirect: 'manual' })).headers.get('strict-transport-security')
     if (!hsts) sitewide('warn', '正式站缺少 Strict-Transport-Security')
